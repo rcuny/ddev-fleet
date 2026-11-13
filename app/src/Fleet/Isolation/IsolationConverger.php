@@ -93,12 +93,15 @@ final class IsolationConverger
         // from its first read, so a CLI `enable` made after that looked like `off` (and its table was removed). FLE-299 N2.
         $settings = $this->host->fresh();
         $mode = $settings?->isolationMode() ?? IsolationMode::Off;
+        if (IsolationMode::Enforce !== $mode) {
+            // Off and report never leave a router allow-list behind (FLE-326), whatever else this pass finds.
+            $this->routerAccess?->sync($mode, []);
+        }
         if (IsolationMode::Off === $mode) {
             // A table left behind (a disable that failed half way) is removed here: the next pass retries it.
             if (is_file($this->hashFile())) {
                 $this->install(IsolationRuleset::disabled());
                 @unlink($this->hashFile());
-                $this->routerAccess?->sync($mode, []);
                 $log('isolation: the mode is off and an earlier ruleset is recorded (applied hash file present): table removed');
 
                 return new IsolationPass($mode, applied: true);

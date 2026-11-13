@@ -74,6 +74,8 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             }
         };
 
+        $access = new \App\Fleet\Isolation\RouterAccess($this->instances, $this->instanceHostnames, $docker, $this->ddev, new \App\Fleet\PortMirror\TraefikDirectory($this->paths->home()));
+
         return new IsolationConverger(
             $this->host,
             new NamedPortRepository($this->em),
@@ -87,6 +89,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir())),
             new \App\Fleet\Isolation\NftablesServiceGuard($this->runner),
             new \App\Fleet\Isolation\BridgeNetfilterGuard($this->bridgeDir()),
+            $access,
         );
     }
 
@@ -128,6 +131,49 @@ final class IsolationConvergerTest extends InstanceJobTestCase
     {
         new ProjectLinkService(new ProjectRepository($this->em), new ProjectLinkRepository($this->em), new AuditLog(new AuditEntryRepository($this->em), $this->clock))
             ->create('acme', 'blog', 'typesense', 8108, 'same', 'search', 'admin');
+    }
+
+    private function routerFile(): string
+    {
+        return $this->paths->home().'/.ddev/traefik/custom-global-config/fleet-router-access.yaml';
+    }
+
+    private function plantRouterFile(): void
+    {
+        @mkdir(\dirname($this->routerFile()), 0o755, true);
+        file_put_contents($this->routerFile(), "stale\n");
+    }
+
+    public function testOffAlwaysRemovesTheRouterFileEvenWithNoRecordedRuleset(): void
+    {
+        $this->plantRouterFile();
+        $this->runner->reset();
+
+        $pass = $this->converger->pass();
+
+        self::assertSame(IsolationMode::Off, $pass->mode);
+        self::assertFileDoesNotExist($this->routerFile());
+    }
+
+    public function testReportModeRemovesTheRouterFile(): void
+    {
+        $this->plantRouterFile();
+        $this->mode(IsolationMode::Report);
+
+        $this->converger->pass();
+
+        self::assertFileDoesNotExist($this->routerFile());
+    }
+
+    public function testDisablingRemovesTheRouterFile(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $this->plantRouterFile();
+        $this->scriptDocker();
+
+        $this->converger->changeMode(IsolationMode::Off, 'admin');
+
+        self::assertFileDoesNotExist($this->routerFile());
     }
 
     public function testModeOffDoesNothingAtAll(): void

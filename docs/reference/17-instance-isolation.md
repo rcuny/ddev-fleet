@@ -137,7 +137,7 @@ A restart that Fleet does itself refreshes the router's address in the table at 
   containers, or the web container of a live link's source. When the `:443` site mirror is active the same rule is applied by
   SNI on its TCP entry point (denied connections go to a closed port), because that entry point re-enters the router from the
   loopback and would hide the caller. The file is a Traefik file-provider fragment: no router restart, and it is refreshed by every
-  isolation pass (Docker events, about a second). `report` and `off` remove it. Residuals: the TLS-terminating named-port mirrors
+  isolation pass (Docker events, about a second). `report` and `off` always remove it (every pass, even when no ruleset is recorded). A declared link opens **all ports** of the target through the router for the link's source web container (the allow-list is by source address and host name, not by port); the link's own port limit applies only to the direct link network. Residuals: the TLS-terminating named-port mirrors
   (for example Typesense on 9108) still re-enter from the loopback, so an instance can reach another instance's *exposed service*
   by `Host` there; and for about a second after a container gets a new address, its own request for its own host name through the
   router is denied.
