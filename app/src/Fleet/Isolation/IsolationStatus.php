@@ -104,10 +104,14 @@ final readonly class IsolationStatus
     {
         $out = [];
         foreach ($flows as [$src, $dst, $port]) {
-            $source = $this->instanceOf($byIp[$src] ?? null);
-            $target = $this->instanceOf($byIp[$dst] ?? null);
+            // FLE-334: an endpoint no running container owns is a stale record (an old router IP, a destroyed instance): it cannot be cut any more.
+            if (!isset($byIp[$src]) || !isset($byIp[$dst])) {
+                continue;
+            }
+            $source = $this->instanceOf($byIp[$src]);
+            $target = $this->instanceOf($byIp[$dst]);
             if (null === $source || null === $target || $source[0]->id() === $target[0]->id()) {
-                $out[] = ['source' => $byIp[$src] ?? $src, 'target' => $byIp[$dst] ?? $dst, 'port' => $port, 'covered' => false, 'suggestion' => null];
+                $out[] = ['source' => $byIp[$src], 'target' => $byIp[$dst], 'port' => $port, 'covered' => false, 'suggestion' => null];
                 continue;
             }
             $covered = false;
