@@ -38,6 +38,8 @@ final readonly class InstanceDbIsolationWriter
     public const string SHARED_NETWORK = 'ddev_default';
     public const string LOCK_ROOT_SQL = "ALTER USER IF EXISTS 'root'@'%' ACCOUNT LOCK";
     public const string SOCKET_USER_SQL_MARIADB = "CREATE USER IF NOT EXISTS 'mysql'@'localhost' IDENTIFIED VIA unix_socket; GRANT ALL ON *.* TO 'mysql'@'localhost' WITH GRANT OPTION";
+    /** FLE-333: MySQL 5.7/8.0 ship auth_socket.so but do not load it; MariaDB has unix_socket built in. Fails harmlessly when already loaded. */
+    public const string SOCKET_PLUGIN_SQL_MYSQL = "INSTALL PLUGIN auth_socket SONAME 'auth_socket.so'";
     public const string SOCKET_USER_SQL_MYSQL = "CREATE USER IF NOT EXISTS 'mysql'@'localhost' IDENTIFIED WITH auth_socket; GRANT ALL ON *.* TO 'mysql'@'localhost' WITH GRANT OPTION";
 
     public function __construct(private Ddev $ddev, private ?AuditLog $audit = null)
@@ -203,7 +205,7 @@ final readonly class InstanceDbIsolationWriter
      * account does not exist, MariaDB falls back to the anonymous `''@localhost` (no privileges) and answers ERROR 1044.
      * The fix is the missing account: `mysql@localhost`, unix_socket only (usable by the OS user `mysql` inside the db
      * container, the same power as the `root@localhost` socket account that already exists, so no new network exposure), with
-     * ALL on `*.*` because import-db drops and creates the database. MariaDB syntax first, then MySQL's auth_socket. The
+     * ALL on `*.*` because import-db drops and creates the database. MariaDB syntax first, then MySQL's auth_socket (INSTALL PLUGIN first, FLE-333). The
      * anonymous users are left alone: dropping them only turns 1044 into 1045. Idempotent, runs after every start, never fatal.
      *
      * @param \Closure(string): void $log
@@ -224,6 +226,8 @@ final readonly class InstanceDbIsolationWriter
             }
             $result = $this->ddev->dbSql($container, self::SOCKET_USER_SQL_MARIADB);
             if (!$result->isSuccess()) {
+                // MySQL (FLE-333): load the plugin first; its result is ignored (error 1125 = already loaded), the CREATE USER decides.
+                $this->ddev->dbSql($container, self::SOCKET_PLUGIN_SQL_MYSQL);
                 $result = $this->ddev->dbSql($container, self::SOCKET_USER_SQL_MYSQL);
             }
         } catch (\Throwable $e) {
