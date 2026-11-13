@@ -48,17 +48,19 @@ final class IsolationConverger
 
     /**
      * One pass. Never throws: whatever goes wrong (Docker, the helper, a rendering error) comes back as `error`, so isolation
-     * can never fail a deploy or a start. Two passes never run at once: a pass that finds another running does nothing.
+     * can never fail a deploy or a start. Two passes never run at once: a pass that finds another running does nothing, unless $wait is set (it then waits its turn).
      *
      * @param (\Closure(string): void)|null $log
      */
-    public function pass(?\Closure $log = null): IsolationPass
+    public function pass(?\Closure $log = null, bool $wait = false): IsolationPass
     {
         $log ??= static function (string $line): void {
         };
         try {
             $lock = $this->locks->createLock('isolation.pass', 120.0);
-            if (!$lock->acquire(false)) {
+            // $wait (a link created or deleted): a pass already running read the links before this change, so wait for it and run
+            // another one instead of returning "busy" and leaving the change to the watcher (65 s, FLE-326 live check).
+            if (!$lock->acquire($wait)) {
                 return new IsolationPass($this->mode(), busy: true);
             }
         } catch (\Throwable $e) {

@@ -20,6 +20,11 @@ final class RouterAccessRenderer
     public const string FILENAME = 'fleet-router-access.yaml';
     public const string SITE_ENTRYPOINT = 'fleet-mirror-443';
     public const int PRIORITY = 100000;
+    /**
+     * The mirror's allow routers must beat the HTTP TLS deny routers of the same instance (Traefik ranks TCP and HTTP TLS routers
+     * together by priority; at a tie the HTTP one won and answered 404 for an instance's own name, FLE-326 live check 2).
+     */
+    public const int ALLOW_PRIORITY = 200000;
     /** Above the mirror's own catch-all (a rule of 12 characters), below every instance's allow router. */
     public const int DENY_REST_PRIORITY = 50000;
     public const string BLACKHOLE = '127.0.0.1:9';
@@ -60,7 +65,7 @@ final class RouterAccessRenderer
                 $out[] = '    fleet-iso-'.$entry->instanceId.":\n";
                 $out[] = '      entryPoints: ['.self::SITE_ENTRYPOINT."]\n";
                 $out[] = '      rule: "'.self::allowRule($entry)."\"\n";
-                $out[] = '      priority: '.self::PRIORITY."\n";
+                $out[] = '      priority: '.self::ALLOW_PRIORITY."\n";
                 $out[] = '      service: '.self::SITE_ENTRYPOINT."\n";
                 $out[] = "      tls:\n        passthrough: true\n";
             }

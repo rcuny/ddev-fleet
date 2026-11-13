@@ -41,6 +41,9 @@ final class RouterAccessRendererTest extends TestCase
         self::assertStringContainsString('rule: "(HostSNI(`a.x.test`)) && (ClientIP(`127.0.0.1/32`) || ClientIP(`172.18.0.1/32`) || ClientIP(`172.18.0.5/32`))"', $out);
         self::assertStringContainsString('rule: "(HostSNI(`b.x.test`)) && (ClientIP(`127.0.0.1/32`) || ClientIP(`172.18.0.1/32`) || ClientIP(`172.18.0.7/32`))"', $out);
         self::assertSame(2, substr_count($out, "      service: fleet-mirror-443\n"));
+        // N1: the allow routers outrank the HTTP TLS deny routers (100000) of the same names, or an instance's own name would end in them.
+        self::assertSame(2, substr_count($out, "      priority: 200000\n      service: fleet-mirror-443\n"));
+        self::assertSame(2, substr_count($out, "      priority: 100000\n      service: noop@internal\n      tls: {}\n"));
         // The catch-all: any other SNI (or none) is dropped, at a priority above the mirror's own HostSNI(`*`) and below the allow routers.
         self::assertMatchesRegularExpression('/fleet-iso-deny-rest:\n      entryPoints: \[fleet-mirror-443\]\n      rule: "HostSNI\(`\*`\)"\n      priority: 50000\n      service: fleet-iso-deny\n/', $out);
         self::assertStringContainsString('address: "127.0.0.1:9"', $out);

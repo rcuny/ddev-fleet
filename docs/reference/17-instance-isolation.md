@@ -135,7 +135,8 @@ A restart that Fleet does itself refreshes the router's address in the table at 
   for every instance a Traefik router (HTTP and HTTPS, priority 100000) that answers `noop@internal` (not the site) to a request
   for the instance's host names unless the source is the `ddev_default` gateway (Caddy), the loopback, one of the instance's own
   containers, or the web container of a live link's source. When the `:443` site mirror is active the same rule is applied by
-  SNI on its TCP entry point: it forwards an instance's names only for that instance's allowed sources and drops every other
+  SNI on its TCP entry point: it forwards an instance's names only for that instance's allowed sources (these routers have priority 200000, above the
+  HTTP deny routers at 100000, so an instance's own name keeps working) and drops every other
   connection (another SNI, or none), because that entry point re-enters the router from the loopback and would hide the caller.
   DDEV copies `custom-global-config` into the router's own volume only at a `ddev start`, so Fleet also puts the file into
   `ddev-router` itself (`/mnt/ddev-global-cache/traefik/config/`, copied under a temporary name and renamed) on every isolation pass

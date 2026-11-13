@@ -432,6 +432,32 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         }
     }
 
+    /** FLE-326 N2: a link change waits for the pass in progress and then runs its own, instead of being dropped as "busy". */
+    public function testAPassThatWaitsRunsAfterTheOneInProgressInsteadOfBeingDropped(): void
+    {
+        $this->mode(IsolationMode::Report);
+        $code = '$a = $argv[1]; require $argv[2]; $l = (new Symfony\\Component\\Lock\\LockFactory(new Symfony\\Component\\Lock\\Store\\FlockStore($a)))->createLock("isolation.pass", 120.0); $l->acquire(true); echo "held\n"; usleep(1500000); $l->release();';
+        $process = new \Symfony\Component\Process\Process([\PHP_BINARY, '-r', $code, '--', $this->paths->locksDir(), \dirname(__DIR__, 4).'/vendor/autoload.php']);
+        $process->start();
+        $deadline = microtime(true) + 10;
+        while (!str_contains($process->getOutput(), 'held') && microtime(true) < $deadline) {
+            usleep(20000);
+        }
+        self::assertStringContainsString('held', $process->getOutput());
+        $this->scriptDocker();
+
+        self::assertTrue($this->converger->pass()->busy, 'without wait the pass is skipped');
+
+        $start = microtime(true);
+        $pass = $this->converger->pass(null, true);
+        $process->wait();
+
+        self::assertFalse($pass->busy);
+        self::assertTrue($pass->ok(), (string) $pass->error);
+        self::assertGreaterThan(0.5, microtime(true) - $start, 'it waited for the holder');
+        self::assertTrue($pass->applied, 'and ran its own pass afterwards');
+    }
+
     public function testASecondPassWhileOneRunsDoesNothing(): void
     {
         $this->mode(IsolationMode::Report);
