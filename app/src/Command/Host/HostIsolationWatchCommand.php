@@ -52,9 +52,11 @@ final class HostIsolationWatchCommand extends Command implements SignalableComma
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $listener = new IsolationEventListener($this->converger->pass(...), $this->logger);
-        // One pass at start: events missed while the unit was down (a restart, an upgrade) are caught up at once.
+        // The stream starts at this second, before the start pass, so events during the pass are replayed. The pass catches up
+        // whatever happened while the unit was down (a restart, an upgrade).
+        $source = new DockerEventsProcess($this->runner, time());
         $this->converger->pass();
-        if ($listener->run(new DockerEventsProcess($this->runner), fn (): bool => $this->stop)) {
+        if ($listener->run($source, fn (): bool => $this->stop)) {
             return Command::SUCCESS;
         }
         $this->logger->error('docker events did not answer; the unit restarts the listener.');

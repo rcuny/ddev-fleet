@@ -57,6 +57,22 @@ final class IsolationEventListenerTest extends TestCase
         self::assertSame([1000], $this->sleeps);
     }
 
+    public function testEventsStampedBeforeThePassStartedAreCoveredByIt(): void
+    {
+        $at = static fn (int $nano): string => '{"Type":"container","Action":"start","timeNano":'.$nano.',"Actor":{"Attributes":{"name":"ddev-router"}}}';
+        $listener = new IsolationEventListener(function (): IsolationPass {
+            ++$this->passes;
+
+            return new IsolationPass(IsolationMode::Enforce);
+        }, sleepMs: static function (int $ms): void {
+        }, nowNano: static fn (): int => 5_000);
+
+        // The first event starts a pass at t=5000; the second (t=4000, arrived during the debounce) is covered, the third (t=6000) is not.
+        $listener->run($this->source([[$at(3000)], [$at(4000)."\n".$at(5000)], [$at(6000)]]), $this->stopAfter(3));
+
+        self::assertSame(2, $this->passes);
+    }
+
     public function testIrrelevantEventsRunNoPass(): void
     {
         $this->listener()->run($this->source([['{"Type":"container","Action":"start","Actor":{"Attributes":{"name":"other"}}}'], ['']]), $this->stopAfter(2));

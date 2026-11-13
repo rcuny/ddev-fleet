@@ -22,23 +22,33 @@ final class IsolationEventListener
     /** @var \Closure(int): void */
     private readonly \Closure $sleepMs;
 
+    /** @var \Closure(): int */
+    private readonly \Closure $nowNano;
+
+    /** Docker time (ns) up to which events are covered by a pass that started after them. */
+    private int $coveredNano = 0;
+
     /**
      * @param \Closure(): IsolationPass  $pass    one converger pass (`$converger->pass(...)`)
      * @param (\Closure(int): void)|null $sleepMs
+     * @param (\Closure(): int)|null     $nowNano host time in nanoseconds (tests inject a fake)
      */
     public function __construct(
         private readonly \Closure $pass,
         private readonly LoggerInterface $logger = new NullLogger(),
         ?\Closure $sleepMs = null,
+        ?\Closure $nowNano = null,
     ) {
+        $this->nowNano = $nowNano ?? static fn (): int => (int) (microtime(true) * 1_000_000_000);
         $this->sleepMs = $sleepMs ?? static function (int $ms): void {
             usleep($ms * 1000);
         };
     }
 
     /**
-     * Consumes the source until its stream ends. A chunk that holds a relevant event waits out the debounce (events that pile
-     * up meanwhile arrive in the next chunk and cost at most one more pass, which changes nothing), then one pass runs.
+     * Consumes the source until its stream ends. A relevant event waits out the debounce, then one pass runs; events stamped
+     * (`timeNano`) before that pass started are covered by it and start none, so a burst costs one pass plus at most one for
+     * events that really came after.
      *
      * @param (\Closure(): bool)|null $stop asked after each window of the stream
      *
@@ -49,8 +59,11 @@ final class IsolationEventListener
         do {
             $ok = $source->consume(function (string $chunk): void {
                 foreach (explode("\n", $chunk) as $line) {
-                    if ('' !== $line && self::relevant($line)) {
+                    if ('' !== $line && self::relevant($line) && !$this->covered($line)) {
                         ($this->sleepMs)((int) (self::DEBOUNCE * 1000));
+                        // Every event stamped before this instant is covered by the pass that starts now: the events that
+                        // piled up during the sleep are dropped by their own timestamps, not by luck of chunking.
+                        $this->coveredNano = ($this->nowNano)();
                         $this->converge();
 
                         return;
@@ -85,6 +98,14 @@ final class IsolationEventListener
                 && ('ddev_default' === $name || str_starts_with($name, 'fleet-link-')),
             default => false,
         };
+    }
+
+    private function covered(string $line): bool
+    {
+        $event = json_decode($line, true);
+        $nano = \is_array($event) && \is_int($event['timeNano'] ?? null) ? $event['timeNano'] : null;
+
+        return null !== $nano && $nano <= $this->coveredNano;
     }
 
     private function converge(): void
