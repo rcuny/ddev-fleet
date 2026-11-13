@@ -25,6 +25,8 @@ final readonly class MirrorPlan
         public array $ports = [],
         public ?int $siteTarget = null,
         public array $skipped = [],
+        /** The :443 passthrough sends a PROXY header: only while the router's LIVE static configuration trusts it (FLE-326), else the mirror works without it. */
+        public bool $proxy = false,
     ) {
     }
 
@@ -72,8 +74,13 @@ final readonly class MirrorPlan
         return [] === $this->ports && null === $this->siteTarget;
     }
 
+    public function withProxy(bool $proxy): self
+    {
+        return new self($this->ports, $this->siteTarget, $this->skipped, $proxy);
+    }
+
     public function withSkipped(string $reason): self
     {
-        return new self($this->ports, $this->siteTarget, [...$this->skipped, $reason]);
+        return new self($this->ports, $this->siteTarget, [...$this->skipped, $reason], $this->proxy);
     }
 }

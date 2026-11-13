@@ -121,6 +121,18 @@ final class RouterCopiesTest extends PortMirrorTestCase
         self::assertNotSame([], $repair['problems']);
     }
 
+    public function testAnUnreadableStaticFileIsAMismatchNeverUnknown(): void
+    {
+        $this->runner->expect(['docker', 'inspect', '--format', '{{.State.Running}}'], new CommandResult(0, "true\n"));
+        $this->runner->expect(['docker', 'exec', 'ddev-router', 'cat'], new CommandResult(0, $this->hostDynamic()));
+
+        $rows = $this->copies->check();
+
+        $static = array_values(array_filter($rows, static fn (array $r): bool => str_contains($r['what'], 'static')));
+        self::assertSame('missing', $static[0]['actual']);
+        self::assertFalse($static[0]['ok']);
+    }
+
     public function testCheckReportsEveryMismatch(): void
     {
         $this->router('old dynamic', $this->oldStatic());

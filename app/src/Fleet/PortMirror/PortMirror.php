@@ -38,7 +38,14 @@ final readonly class PortMirror
      */
     public function plan(): MirrorPlan
     {
-        return $this->planner->plan($this->enabled(), $this->ports->all());
+        $plan = $this->planner->plan($this->enabled(), $this->ports->all());
+        if (null === $plan->siteTarget) {
+            return $plan;
+        }
+
+        // FLE-326: the passthrough may send a PROXY header only to a router whose LIVE static configuration already trusts it (an
+        // unreachable API counts as "does not"): otherwise own-name HTTPS over :443 would close. The trust comes first, then the header.
+        return $plan->withProxy(true === $this->live->proxyTrusted(MirrorPlan::siteTargetEntrypoint($plan->siteTarget)));
     }
 
     public function enabled(): bool

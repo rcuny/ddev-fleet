@@ -24,6 +24,8 @@ final readonly class RouterCopies
 {
     public const string ROUTER = 'ddev-router';
     public const string TREE = '/mnt/ddev-global-cache/traefik';
+    /** DDEV v1.25's router reads this symlink; `ddev start` renders its target in the cache volume. */
+    private const string DDEV_STATIC_LINK = '/etc/traefik/traefik.yaml';
     private const float TIMEOUT = 30.0;
 
     public function __construct(
@@ -120,8 +122,8 @@ final readonly class RouterCopies
             } finally {
                 @unlink($tmp);
             }
-        } elseif ('unknown' === $state) {
-            $result['problems'][] = 'the router\'s static configuration file could not be found, the PROXY trust waits for the next ddev start';
+        } elseif ('missing' === $state) {
+            $result['problems'][] = 'the router\'s static configuration file could not be read, the PROXY trust waits for the next ddev start (the :443 mirror stays without PROXY)';
         }
         if ('same' === $state || $result['restartNeeded']) {
             foreach ($this->trusting($fragment) as $name) {
@@ -171,46 +173,52 @@ final readonly class RouterCopies
     /**
      * @param array<string, mixed> $fragment
      *
-     * @return array{0: string, 1: string|null, 2: string|null} state (same|different|unknown), the router's static file, the merged text to write
+     * @return array{0: string, 1: string|null, 2: string|null} state (same|different|missing), the router's static file, the merged text to write
      */
     private function staticState(array $fragment): array
     {
-        $path = $this->staticPath();
-        if (null === $path) {
-            return ['unknown', null, null];
-        }
-        $text = $this->read($path);
-        if (null === $text) {
-            return ['unknown', $path, null];
-        }
-        try {
-            $current = Yaml::parse($text);
-        } catch (ParseException) {
-            return ['unknown', $path, null];
-        }
-        if (!\is_array($current)) {
-            return ['unknown', $path, null];
-        }
-        $merged = array_replace_recursive($current, $fragment);
-        if ($merged == $current) {
-            return ['same', $path, null];
+        foreach ($this->staticCandidates() as $path) {
+            $text = $this->read($path);
+            if (null === $text) {
+                continue;
+            }
+            try {
+                $current = Yaml::parse($text);
+            } catch (ParseException) {
+                return ['missing', $path, null];
+            }
+            if (!\is_array($current)) {
+                return ['missing', $path, null];
+            }
+            $merged = array_replace_recursive($current, $fragment);
+
+            return $merged == $current ? ['same', $path, null] : ['different', $path, Yaml::dump($merged, 10, 2)];
         }
 
-        return ['different', $path, Yaml::dump($merged, 10, 2)];
+        // Never "unknown": a static file that cannot be read is a mismatch (and nothing is pushed or restarted for it).
+        return ['missing', null, null];
     }
 
-    /** The configuration file Traefik was started with (`--configFile=` in the router's command line). */
-    private function staticPath(): ?string
+    /**
+     * The candidates for the router's static configuration file, best first: where `/etc/traefik/traefik.yaml` points (DDEV's
+     * layout: a symlink to `.static_config.yaml` in the cache volume), the `--configFile=` of an older router, and the default name.
+     *
+     * @return list<string>
+     */
+    private function staticCandidates(): array
     {
-        $out = $this->run(['docker', 'inspect', '--format', '{{json .Config.Entrypoint}} {{json .Config.Cmd}} {{json .Args}}', self::ROUTER]);
-        if (null === $out) {
-            return null;
+        $candidates = [];
+        $link = trim((string) $this->run(['docker', 'exec', self::ROUTER, 'readlink', '-f', self::DDEV_STATIC_LINK]));
+        if (str_starts_with($link, self::TREE.'/')) {
+            $candidates[] = $link;
         }
-        if (1 !== preg_match('~--configfile=(/[A-Za-z0-9_./-]+)~i', $out, $m) || !str_starts_with($m[1], self::TREE.'/')) {
-            return null;
+        $args = $this->run(['docker', 'inspect', '--format', '{{json .Config.Entrypoint}} {{json .Config.Cmd}} {{json .Args}}', self::ROUTER]);
+        if (null !== $args && 1 === preg_match('~--configfile=(/[A-Za-z0-9_./-]+)~i', $args, $m) && str_starts_with($m[1], self::TREE.'/')) {
+            $candidates[] = $m[1];
         }
+        $candidates[] = self::TREE.'/.static_config.yaml';
 
-        return $m[1];
+        return array_values(array_unique($candidates));
     }
 
     private function running(): bool
