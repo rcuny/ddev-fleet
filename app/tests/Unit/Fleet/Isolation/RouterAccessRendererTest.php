@@ -30,14 +30,21 @@ final class RouterAccessRendererTest extends TestCase
         self::assertStringNotContainsString('tcp:', $out);
     }
 
-    public function testTheSiteMirrorAddsASniRouterPerInstanceAndOneBlackholeService(): void
+    public function testTheSiteMirrorForwardsOnlyAnInstancesNamesForItsSourcesAndDropsEverythingElse(): void
     {
-        $out = RouterAccessRenderer::render([new RouterAccessEntry('a', ['a.x.test'], ['172.18.0.1'])], true);
+        $out = RouterAccessRenderer::render([
+            new RouterAccessEntry('a', ['a.x.test'], ['172.18.0.1', '172.18.0.5']),
+            new RouterAccessEntry('b', ['b.x.test'], ['172.18.0.1', '172.18.0.7']),
+        ], true);
 
         self::assertStringContainsString("tcp:\n  routers:\n    fleet-iso-a:\n      entryPoints: [fleet-mirror-443]\n", $out);
-        self::assertStringContainsString('HostSNI(`a.x.test`)', $out);
-        self::assertStringContainsString('passthrough: true', $out);
+        self::assertStringContainsString('rule: "(HostSNI(`a.x.test`)) && (ClientIP(`127.0.0.1/32`) || ClientIP(`172.18.0.1/32`) || ClientIP(`172.18.0.5/32`))"', $out);
+        self::assertStringContainsString('rule: "(HostSNI(`b.x.test`)) && (ClientIP(`127.0.0.1/32`) || ClientIP(`172.18.0.1/32`) || ClientIP(`172.18.0.7/32`))"', $out);
+        self::assertSame(2, substr_count($out, "      service: fleet-mirror-443\n"));
+        // The catch-all: any other SNI (or none) is dropped, at a priority above the mirror's own HostSNI(`*`) and below the allow routers.
+        self::assertMatchesRegularExpression('/fleet-iso-deny-rest:\n      entryPoints: \[fleet-mirror-443\]\n      rule: "HostSNI\(`\*`\)"\n      priority: 50000\n      service: fleet-iso-deny\n/', $out);
         self::assertStringContainsString('address: "127.0.0.1:9"', $out);
+        self::assertStringNotContainsString('!(', substr($out, (int) strpos($out, 'tcp:')), 'the TCP side is an allow-list, not a per-name deny');
     }
 
     public function testInvalidNamesAndAddressesNeverReachTheFile(): void

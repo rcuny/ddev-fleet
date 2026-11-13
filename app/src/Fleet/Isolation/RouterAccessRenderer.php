@@ -8,8 +8,8 @@ namespace App\Fleet\Isolation;
  * FLE-326: the Traefik dynamic-config file that closes the router path between instances. For every instance a deny
  * router is rendered at a high priority: a request for one of the instance's host names whose source is NOT in its allow-list
  * ends in `noop@internal` instead of reaching the instance's own (DDEV generated) router. HTTP and HTTPS get one router each;
- * when the `:443` site mirror exists, a TCP router on `fleet-mirror-443` denies by SNI + source the same way (that entry
- * point forwards to the HTTPS entry point from 127.0.0.1, which would otherwise hide the caller).
+ * when the `:443` site mirror exists, its TCP entry point forwards only an instance's names for the instance's sources and drops
+ * every other connection (that entry point re-enters the HTTPS entry point from 127.0.0.1, which would otherwise hide the caller).
  *
  * Every value is an instance id, a DNS name or an IPv4 address that was validated before it got here; anything else is
  * dropped, so nothing a user typed reaches the file.
@@ -20,6 +20,8 @@ final class RouterAccessRenderer
     public const string FILENAME = 'fleet-router-access.yaml';
     public const string SITE_ENTRYPOINT = 'fleet-mirror-443';
     public const int PRIORITY = 100000;
+    /** Above the mirror's own catch-all (a rule of 12 characters), below every instance's allow router. */
+    public const int DENY_REST_PRIORITY = 50000;
     public const string BLACKHOLE = '127.0.0.1:9';
 
     private function __construct()
@@ -50,25 +52,43 @@ final class RouterAccessRenderer
             }
         }
         if ($siteMirror) {
+            // The mirror entry point re-enters the HTTPS entry point from 127.0.0.1, so whatever it lets through looks local to the
+            // HTTP routers above. It therefore decides on the real client: an instance's names (SNI) are forwarded only for its
+            // allowed sources, and EVERY other connection (another SNI, none) is dropped, whatever the Host header will say.
             $out[] = "tcp:\n  routers:\n";
             foreach ($entries as $entry) {
                 $out[] = '    fleet-iso-'.$entry->instanceId.":\n";
                 $out[] = '      entryPoints: ['.self::SITE_ENTRYPOINT."]\n";
-                $out[] = '      rule: "'.self::rule($entry, sni: true)."\"\n";
+                $out[] = '      rule: "'.self::allowRule($entry)."\"\n";
                 $out[] = '      priority: '.self::PRIORITY."\n";
-                $out[] = "      service: fleet-iso-deny\n";
+                $out[] = '      service: '.self::SITE_ENTRYPOINT."\n";
                 $out[] = "      tls:\n        passthrough: true\n";
             }
+            $out[] = "    fleet-iso-deny-rest:\n";
+            $out[] = '      entryPoints: ['.self::SITE_ENTRYPOINT."]\n";
+            $out[] = "      rule: \"HostSNI(`*`)\"\n";
+            $out[] = '      priority: '.self::DENY_REST_PRIORITY."\n";
+            $out[] = "      service: fleet-iso-deny\n";
+            $out[] = "      tls:\n        passthrough: true\n";
             $out[] = "  services:\n    fleet-iso-deny:\n      loadBalancer:\n        servers:\n          - address: \"".self::BLACKHOLE."\"\n";
         }
 
         return implode('', $out);
     }
 
-    /** `(Host(a) || Host(b)) && !(ClientIP(x) || ClientIP(y))`, SNI instead of Host for the TCP router. */
-    private static function rule(RouterAccessEntry $entry, bool $sni = false): string
+    /** `(HostSNI(a) || HostSNI(b)) && (ClientIP(x) || ClientIP(y))`: the connections the site mirror forwards. */
+    private static function allowRule(RouterAccessEntry $entry): string
     {
-        $hosts = array_map(static fn (string $h): string => ($sni ? 'HostSNI' : 'Host').'(`'.$h.'`)', self::hosts($entry));
+        $hosts = array_map(static fn (string $h): string => 'HostSNI(`'.$h.'`)', self::hosts($entry));
+        $sources = array_map(static fn (string $s): string => 'ClientIP(`'.$s.'`)', self::sources($entry));
+
+        return '('.implode(' || ', $hosts).') && ('.implode(' || ', $sources).')';
+    }
+
+    /** `(Host(a) || Host(b)) && !(ClientIP(x) || ClientIP(y))`, SNI instead of Host for the TCP router. */
+    private static function rule(RouterAccessEntry $entry): string
+    {
+        $hosts = array_map(static fn (string $h): string => 'Host(`'.$h.'`)', self::hosts($entry));
         $sources = array_map(static fn (string $s): string => 'ClientIP(`'.$s.'`)', self::sources($entry));
 
         return '('.implode(' || ', $hosts).') && !('.implode(' || ', $sources).')';

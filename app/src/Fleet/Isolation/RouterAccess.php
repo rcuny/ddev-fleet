@@ -22,6 +22,9 @@ use App\Fleet\Ssh\AtomicFile;
  */
 final readonly class RouterAccess
 {
+    /** Where the router (a Traefik file provider on its own copy of the directory) reads global custom config. */
+    public const string ROUTER_FILE = '/mnt/ddev-global-cache/traefik/config/'.RouterAccessRenderer::FILENAME;
+
     public function __construct(
         private InstanceRepository $instances,
         private InstanceHostnames $hostnames,
@@ -40,9 +43,7 @@ final readonly class RouterAccess
     {
         try {
             if (IsolationMode::Enforce !== $mode) {
-                $this->remove();
-
-                return null;
+                return $this->withdraw();
             }
             $gateway = $this->docker->gateway();
             if (null === $gateway) {
@@ -68,21 +69,18 @@ final readonly class RouterAccess
             ksort($entries);
             $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror());
             if ('' === $text) {
-                $this->remove();
-
-                return null;
+                return $this->withdraw();
             }
             $file = $this->file();
-            if (@file_get_contents($file) === $text) {
-                return null;
+            if (@file_get_contents($file) !== $text) {
+                $dir = \dirname($file);
+                if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
+                    return 'router access: cannot create '.$dir;
+                }
+                AtomicFile::write($file, $text, 0o644);
             }
-            $dir = \dirname($file);
-            if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
-                return 'router access: cannot create '.$dir;
-            }
-            AtomicFile::write($file, $text, 0o644);
 
-            return null;
+            return $this->push($text);
         } catch (DdevUnavailable $e) {
             return 'router access: Docker did not answer ('.$e->getMessage().'), the allow-list is left as it was';
         } catch (\Throwable $e) {
@@ -95,10 +93,84 @@ final readonly class RouterAccess
         return $this->traefik->dynamicDir().'/'.RouterAccessRenderer::FILENAME;
     }
 
-    private function remove(): void
+    /**
+     * The report-and-off state: no host file, and no copy in the router. The router reads its own copy of the directory, which
+     * DDEV refreshes only at a `ddev start`, so the copy is removed (and checked) here, and retried by the next pass while the
+     * marker stays.
+     */
+    private function withdraw(): ?string
     {
-        if (file_exists($this->file())) {
+        $hadFile = file_exists($this->file());
+        if ($hadFile) {
             @unlink($this->file());
+        }
+        $marker = $this->traefik->routerAccessMarker();
+        if (!$hadFile && !file_exists($marker)) {
+            return null;
+        }
+        if (!$this->docker->routerRunning()) {
+            // A stopped router reads the host directory again at its next `ddev start`, which no longer has the file.
+            @unlink($marker);
+
+            return null;
+        }
+        if (!$this->docker->routerRemove(self::ROUTER_FILE)) {
+            $this->mark();
+
+            return 'router access: the file could not be removed from the router, the next pass retries';
+        }
+        @unlink($marker);
+
+        return null;
+    }
+
+    /** Makes the router's copy equal to $text (checked every pass: a `ddev start` or a manual change cannot leave it stale). */
+    private function push(string $text): ?string
+    {
+        if (!$this->docker->routerRunning()) {
+            return null;
+        }
+        if ($this->docker->routerRead(self::ROUTER_FILE) === $text) {
+            $this->mark();
+
+            return null;
+        }
+        $this->mark();
+        if (!$this->docker->routerPut($this->file(), self::ROUTER_FILE)) {
+            return 'router access: the file could not be copied into the router, the next pass retries';
+        }
+
+        return null;
+    }
+
+    private function mark(): void
+    {
+        if (!file_exists($this->traefik->routerAccessMarker())) {
+            @file_put_contents($this->traefik->routerAccessMarker(), "1\n");
+        }
+    }
+
+    /**
+     * For `host:isolation:check`: whether the router's own copy is what the mode promises.
+     *
+     * @return array{expected: string, actual: string, ok: bool}|null null while the router is not running
+     */
+    public function verify(IsolationMode $mode): ?array
+    {
+        try {
+            if (!$this->docker->routerRunning()) {
+                return null;
+            }
+            $copy = $this->docker->routerRead(self::ROUTER_FILE);
+            if (IsolationMode::Enforce !== $mode) {
+                return ['expected' => 'absent', 'actual' => null === $copy ? 'absent' : 'present', 'ok' => null === $copy];
+            }
+            $host = @file_get_contents($this->file());
+            $same = \is_string($host) && $copy === $host;
+
+            return ['expected' => 'same as the host file', 'actual' => null === $copy ? 'missing' : ($same ? 'same' : 'different'), 'ok' => $same];
+        } catch (\Throwable) {
+            return null;
         }
     }
 

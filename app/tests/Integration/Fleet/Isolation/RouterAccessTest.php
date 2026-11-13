@@ -105,4 +105,102 @@ final class RouterAccessTest extends InstanceJobTestCase
         self::assertNotNull($problem);
         self::assertSame($before, (string) file_get_contents($this->access->file()));
     }
+
+    private const array RUNNING = ['docker', 'inspect', '--format', '{{.State.Running}}', 'ddev-router'];
+
+    private function router(string $copy = ''): void
+    {
+        $this->runner->expect(self::RUNNING, new CommandResult(0, "true\n"));
+        if ('' !== $copy) {
+            $this->runner->expect(['docker', 'exec', 'ddev-router', 'cat', RouterAccess::ROUTER_FILE], new CommandResult(0, $copy));
+        }
+    }
+
+    public function testAnEnforcePassCopiesTheFileIntoTheRouterWhenItsCopyIsMissingOrStale(): void
+    {
+        $this->docker();
+        $this->router('stale');
+
+        self::assertNull($this->access->sync(IsolationMode::Enforce, []));
+
+        $cp = $this->runner->callsMatching(['docker', 'cp', $this->access->file(), 'ddev-router:'.RouterAccess::ROUTER_FILE.'.tmp']);
+        self::assertCount(1, $cp);
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f', RouterAccess::ROUTER_FILE.'.tmp', RouterAccess::ROUTER_FILE]));
+        self::assertFileExists($this->traefik->routerAccessMarker());
+    }
+
+    public function testNothingIsCopiedWhenTheRouterAlreadyHoldsTheSameFile(): void
+    {
+        $this->docker();
+        $this->access->sync(IsolationMode::Enforce, []);
+        $this->runner->reset();
+        $this->docker();
+        $this->router((string) file_get_contents($this->access->file()));
+
+        $this->access->sync(IsolationMode::Enforce, []);
+
+        self::assertSame([], $this->runner->callsMatching(['docker', 'cp']));
+    }
+
+    public function testOffRemovesTheRouterCopyAtOnceAndForgetsTheMarker(): void
+    {
+        $this->docker();
+        $this->access->sync(IsolationMode::Enforce, []);
+        $this->runner->reset();
+        $this->router();
+        $this->runner->expect(['docker', 'exec', 'ddev-router', 'rm', '-f', RouterAccess::ROUTER_FILE, RouterAccess::ROUTER_FILE.'.tmp'], new CommandResult(0, ''));
+
+        self::assertNull($this->access->sync(IsolationMode::Off, []));
+
+        self::assertFileDoesNotExist($this->access->file());
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'rm', '-f']));
+        self::assertFileDoesNotExist($this->traefik->routerAccessMarker());
+    }
+
+    public function testAFailedRemovalFromTheRouterIsRetriedByTheNextPass(): void
+    {
+        $this->docker();
+        $this->access->sync(IsolationMode::Enforce, []);
+        $this->runner->reset();
+        $this->router();
+        $this->runner->expect(['docker', 'exec', 'ddev-router', 'rm', '-f'], new CommandResult(1, 'no'));
+
+        self::assertNotNull($this->access->sync(IsolationMode::Report, []));
+        self::assertFileExists($this->traefik->routerAccessMarker());
+
+        // The host file is gone but the marker keeps the retry alive.
+        $this->runner->reset();
+        $this->router();
+        $this->runner->expect(['docker', 'exec', 'ddev-router', 'rm', '-f'], new CommandResult(0, ''));
+        self::assertNull($this->access->sync(IsolationMode::Report, []));
+        self::assertFileDoesNotExist($this->traefik->routerAccessMarker());
+    }
+
+    public function testOffWithNothingEverWrittenRunsNoDockerCommand(): void
+    {
+        $this->runner->reset();
+
+        self::assertNull($this->access->sync(IsolationMode::Off, []));
+
+        self::assertSame([], $this->runner->calls());
+    }
+
+    public function testVerifyComparesTheRoutersCopyWithTheHostFile(): void
+    {
+        $this->docker();
+        $this->access->sync(IsolationMode::Enforce, []);
+        $host = (string) file_get_contents($this->access->file());
+
+        $this->runner->reset();
+        $this->router($host);
+        self::assertSame(['expected' => 'same as the host file', 'actual' => 'same', 'ok' => true], $this->access->verify(IsolationMode::Enforce));
+
+        $this->runner->reset();
+        $this->router('old');
+        self::assertFalse($this->access->verify(IsolationMode::Enforce)['ok'] ?? true);
+
+        $this->runner->reset();
+        $this->router('old');
+        self::assertFalse($this->access->verify(IsolationMode::Off)['ok'] ?? true, 'a copy in the router in off mode is a failure');
+    }
 }
