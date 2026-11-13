@@ -1,11 +1,24 @@
+parameters:
+    # A host that was installed before FLE-330 has no subscriber secret yet: it keeps working on the publisher secret
+    # until the installer adds MERCURE_SUBSCRIBER_JWT_SECRET to fleet.env.
+    env(MERCURE_SUBSCRIBER_JWT_SECRET): '%env(MERCURE_JWT_SECRET)%'
+
 mercure:
     hubs:
         default:
             url: '%env(default::MERCURE_URL)%'
             public_url: '%env(default::MERCURE_PUBLIC_URL)%'
-            jwt:
+            # Two keys (FLE-330): a leaked subscriber key (the app hands subscriber tokens to API clients and
+            # browsers) must not be able to publish, so the two roles are signed with different secrets.
+            publisher:
                 secret: '%env(MERCURE_JWT_SECRET)%'
-                publish: '*'
+                topics: ['*']
+                claims:
+                    iss: '%env(MERCURE_JWT_ISSUER)%'
+                    sub: 'app'
+                    client_id: 'app'
+            subscriber:
+                secret: '%env(MERCURE_SUBSCRIBER_JWT_SECRET)%'
                 claims:
                     iss: '%env(MERCURE_JWT_ISSUER)%'
                     sub: 'app'
