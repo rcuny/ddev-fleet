@@ -31,6 +31,7 @@ final readonly class IsolationCheck
         private LinkResolver $resolver,
         private DockerNetworks $docker,
         private ?BridgeNetfilterGuard $bridgeNf = null,
+        private ?RouterAccess $routerAccess = null,
     ) {
     }
 
@@ -50,6 +51,11 @@ final readonly class IsolationCheck
             $rows[] = ['from' => 'host', 'to' => 'br_netfilter', 'port' => 0, 'expected' => 'active', 'actual' => 'inactive: '.$problem, 'ok' => false];
         }
 
+        if (null !== $copy = $this->routerAccess?->verify($mode)) {
+            // FLE-326: the router reads its own copy of the allow-list; a host file it never received protects nothing.
+            $rows[] = ['from' => 'host', 'to' => 'router access file in ddev-router', 'port' => 0, ...$copy];
+        }
+
         $perProject = [];
         foreach ($this->instances->all() as $instance) {
             if (InstanceState::Running === $instance->state() && !isset($perProject[$instance->project()->name()])) {
@@ -64,8 +70,11 @@ final readonly class IsolationCheck
                 }
                 // Only the web container is on the shared network: db, Typesense and the like sit on the project network and are never reachable across projects.
                 foreach ([80, 8025] as $port) {
-                    $allowed = $this->linked($links, $from, $other, 'web', $port);
-                    $rows[] = $this->probe($web, $from->id(), 'ddev-'.$other->id().'-web', $other->id().'/web', $port, $enforce ? $allowed : null);
+                    // By container name this probe asks Docker DNS, which may answer with the ddev_default address (dropped) or, for a
+                    // web link, the link network's: a linked web:port is therefore not asserted here (the `link` row below proves it
+                    // through the alias, FLE-326 live check); everything else must be blocked in enforce.
+                    $linked = $this->linked($links, $from, $other, 'web', $port);
+                    $rows[] = $this->probe($web, $from->id(), 'ddev-'.$other->id().'-web', $other->id().'/web', $port, $enforce && !$linked ? false : null);
                 }
             }
             $rows[] = $this->probe($web, $from->id(), DockerNetworks::ROUTER, 'router (traefik api)', 10999, $enforce ? false : null);

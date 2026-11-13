@@ -42,22 +42,25 @@ final class IsolationConverger
         private readonly LockFactory $locks,
         private readonly NftablesServiceGuard $nftables,
         private readonly BridgeNetfilterGuard $bridgeNf,
+        private readonly ?RouterAccess $routerAccess = null,
     ) {
     }
 
     /**
      * One pass. Never throws: whatever goes wrong (Docker, the helper, a rendering error) comes back as `error`, so isolation
-     * can never fail a deploy or a start. Two passes never run at once: a pass that finds another running does nothing.
+     * can never fail a deploy or a start. Two passes never run at once: a pass that finds another running does nothing, unless $wait is set (it then waits its turn).
      *
      * @param (\Closure(string): void)|null $log
      */
-    public function pass(?\Closure $log = null): IsolationPass
+    public function pass(?\Closure $log = null, bool $wait = false): IsolationPass
     {
         $log ??= static function (string $line): void {
         };
         try {
             $lock = $this->locks->createLock('isolation.pass', 120.0);
-            if (!$lock->acquire(false)) {
+            // $wait (a link created or deleted): a pass already running read the links before this change, so wait for it and run
+            // another one instead of returning "busy" and leaving the change to the watcher (65 s, FLE-326 live check).
+            if (!$lock->acquire($wait)) {
                 return new IsolationPass($this->mode(), busy: true);
             }
         } catch (\Throwable $e) {
@@ -92,6 +95,10 @@ final class IsolationConverger
         // from its first read, so a CLI `enable` made after that looked like `off` (and its table was removed). FLE-299 N2.
         $settings = $this->host->fresh();
         $mode = $settings?->isolationMode() ?? IsolationMode::Off;
+        if (IsolationMode::Enforce !== $mode) {
+            // Off and report never leave a router allow-list behind (FLE-326), whatever else this pass finds.
+            $this->routerAccess?->sync($mode, []);
+        }
         if (IsolationMode::Off === $mode) {
             // A table left behind (a disable that failed half way) is removed here: the next pass retries it.
             if (is_file($this->hashFile())) {
@@ -111,6 +118,9 @@ final class IsolationConverger
             return new IsolationPass($mode, error: $problem);
         }
         $links = $this->reconcileLinks($log);
+        if (null !== $problem = $this->routerAccess?->sync($mode, array_values(array_filter($links, static fn (ResolvedLink $l): bool => $l->isLive())))) {
+            $log('isolation: '.$problem);
+        }
         $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
         if (null === $bridge) {
             return new IsolationPass($mode, $links, applied: false);
@@ -164,6 +174,7 @@ final class IsolationConverger
             try {
                 $this->install(IsolationRuleset::disabled());
                 @unlink($this->hashFile());
+                $this->routerAccess?->sync($mode, []);
             } catch (\Throwable $e) {
                 $error = $e;
             }

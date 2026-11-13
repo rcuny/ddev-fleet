@@ -61,6 +61,12 @@ final readonly class TraefikDirectory
         return $this->dir().'/'.self::MARKER_FILENAME;
     }
 
+    /** FLE-326: present while a router-access file may exist in the router's own copy of the directory (so a removal is retried). */
+    public function routerAccessMarker(): string
+    {
+        return $this->dir().'/.fleet-router-access-pushed';
+    }
+
     public function globalConfigFile(): string
     {
         return $this->home.'/.ddev/'.self::GLOBAL_CONFIG_FILENAME;
