@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-13
+
+### Added
+- **FLE-327: the instance network isolation rules are re-applied about a second after a Docker change.** The new unit `fleet-isolation-watch` (command `fleet host:isolation:watch`, run as the `fleet` user) listens to `docker events` and runs an isolation pass one second after a ddev container starts or dies or the `ddev_default` / `fleet-link-*` networks change, so a router that came back with a new address no longer leaves the sites on 502 until the status watcher's two-minute pass (measured on a throwaway host: 79-110 s for a router address change). The two-minute pass stays as the backstop. A pass that finds another one running is asked again instead of being skipped.
+
+### Fixed
+- **FLE-330: the live-feed hub answered an empty 200 through the public URL.** The public Caddy forwarded `Host: <domain>`,
+  which matches no site in the hub's own `http://127.0.0.1:3000` block; the proxy now sends `Host: {upstream_hostport}`
+  (this also affects the web UI's live job log). The proxy and the gate match the exact path `/.well-known/mercure`.
+- **FLE-330: the live-feed hub works for API clients behind the Authelia gate.** `/.well-known/mercure` skips the sign-in
+  for a request that carries `Authorization: Bearer ...` (the hub validates the JWT itself, subscribe on one private
+  topic); a browser without that header still signs in as before. Before, the documented `stream-token` flow ended in a
+  302 to Authelia.
+
+
+- **FLE-333:** MySQL 5.7/8.0 database containers: the `mysql@localhost` socket account (FLE-331) is now created, by loading the `auth_socket` plugin first, so `ddev mysql`, `export-db` and `import-db` no longer fail with ERROR 1044 for the fleet user.
+- **FLE-334: `host:isolation:status` and a repeated `host:isolation:enable --mode=enforce` no longer list stale flows.** A recorded flow whose address no running container owns any more (an old router IP after a router restart, a destroyed instance) is dropped from the flows and from the "would cut" list, since it cannot be cut.
+
+### Security
+- **FLE-326:** **An instance can no longer reach another instance through `ddev-router` on `:8080` and `:8443` by `Host` header (isolation `enforce` mode).** Fleet writes a Traefik file-provider fragment (`fleet-router-access.yaml` in `~/.ddev/traefik/custom-global-config/`) with an HTTP and an HTTPS deny router per instance, bound to the router's HTTP entry points, that lets through only the `ddev_default` gateway (Caddy), the loopback, the instance's own containers and the sources of live links. Fleet pushes the file into the router's own Traefik directory (DDEV copies it there only at a `ddev start`) on every isolation pass and removes it there in `report` and `off`; no router restart, and the port mirror and the router's static configuration are unchanged. The `:443` site mirror is **not** covered yet: the router path stays open on `:443` in `enforce`. `host:isolation:check` verifies the router's copy. See `docs/reference/17-instance-isolation.md`.
+
+- **FLE-330: Mercure publisher and subscriber tokens are signed with different secrets.** A new `fleet.env` key,
+  `MERCURE_SUBSCRIBER_JWT_SECRET`, signs the subscriber tokens (page cookie, `stream-token`); `MERCURE_JWT_SECRET` stays
+  the publisher secret. A leaked subscriber key can no longer publish. The installer adds the key (a fresh random value,
+  never printed) and writes distinct keys into `mercure.env`.
+
+#### Rollout
+- None to apply: the file appears on the next isolation pass of a host in `enforce` mode. Check with an instance's web container: `curl -s -o /dev/null -w '%{http_code}' -H 'Host: <other instance host>' http://ddev-router:8080/` should no longer return the site.
+- The isolation pass now logs its warnings (for example the Traefik API down) to the journal.
+- The installer enables and starts `fleet-isolation-watch`; on a host with isolation `off` it does nothing but listen.
+- The upgrade restarts the Mercure hub with the new subscriber key: open pages poll until they reload, and a
+  `stream-token` obtained before the upgrade stops working (ask for a new one).
+
 ## [1.11.0] - 2026-11-13
 
 ### Added
@@ -1562,7 +1595,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/rcuny/ddev-fleet/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/rcuny/ddev-fleet/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/rcuny/ddev-fleet/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/rcuny/ddev-fleet/compare/v1.9.1...v1.9.2
