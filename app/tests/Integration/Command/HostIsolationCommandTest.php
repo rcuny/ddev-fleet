@@ -86,6 +86,64 @@ final class HostIsolationCommandTest extends KernelTestCase
         self::assertSame([], $doc['links']);
     }
 
+    public function testStatusDropsFlowsRecordedAtAnAddressNoContainerOwnsAnyMore(): void
+    {
+        $this->docker();
+        self::assertSame(0, $this->cli('fleet:host:isolation:enable', ['--mode' => 'report'])->getStatusCode());
+        $table = json_encode(['nftables' => [
+            ['table' => ['family' => 'inet', 'name' => 'fleet_isolation']],
+            ['set' => ['name' => 'routers', 'elem' => ['172.18.0.2']]],
+            ['set' => ['name' => 'observed', 'elem' => [
+                ['concat' => ['172.18.0.5', '172.18.0.6', 8108]],
+                ['concat' => ['172.18.0.99', '172.18.0.5', 80]],
+            ]]],
+        ]], \JSON_THROW_ON_ERROR);
+        $this->runner()
+            ->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, $table))
+            ->expect(['docker', 'network', 'inspect', '--format', '{{range .Containers}}{{.Name}}|{{.IPv4Address}}'."\n".'{{end}}'], new CommandResult(0, "ddev-app--staging-web|172.18.0.5/16\nddev-cms--staging-typesense|172.18.0.6/16\n"));
+        $doc = $this->json($this->cli('fleet:host:isolation:status', ['--json' => true]));
+
+        self::assertCount(1, (array) $doc['flows']);
+    }
+
+    public function testStatusDropsFlowsWhoseTargetIsStale(): void
+    {
+        $this->docker();
+        self::assertSame(0, $this->cli('fleet:host:isolation:enable', ['--mode' => 'report'])->getStatusCode());
+        $this->runner()
+            ->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, $this->table([['172.18.0.5', '172.18.0.6', 8108], ['172.18.0.5', '172.18.0.99', 80]])))
+            ->expect(['docker', 'network', 'inspect', '--format', '{{range .Containers}}{{.Name}}|{{.IPv4Address}}'."\n".'{{end}}'], new CommandResult(0, "ddev-app--staging-web|172.18.0.5/16\nddev-cms--staging-typesense|172.18.0.6/16\n"));
+        $doc = $this->json($this->cli('fleet:host:isolation:status', ['--json' => true]));
+
+        $flows = (array) $doc['flows'];
+        self::assertCount(1, $flows);
+        self::assertSame('cms--staging/typesense', $flows[0]['target']);
+    }
+
+    public function testStatusKeepsEveryFlowWhenNoContainerAddressIsKnown(): void
+    {
+        $this->docker();
+        self::assertSame(0, $this->cli('fleet:host:isolation:enable', ['--mode' => 'report'])->getStatusCode());
+        $this->runner()
+            ->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, $this->table([['172.18.0.5', '172.18.0.6', 8108], ['172.18.0.99', '172.18.0.5', 80]])))
+            ->expect(['docker', 'network', 'inspect', '--format', '{{range .Containers}}{{.Name}}|{{.IPv4Address}}'."\n".'{{end}}'], new CommandResult(0, ''));
+        $doc = $this->json($this->cli('fleet:host:isolation:status', ['--json' => true]));
+
+        $flows = (array) $doc['flows'];
+        self::assertCount(2, $flows);
+        self::assertSame('172.18.0.99', $flows[1]['source']);
+    }
+
+    /** @param list<array{0: string, 1: string, 2: int}> $observed */
+    private function table(array $observed): string
+    {
+        return json_encode(['nftables' => [
+            ['table' => ['family' => 'inet', 'name' => 'fleet_isolation']],
+            ['set' => ['name' => 'routers', 'elem' => ['172.18.0.2']]],
+            ['set' => ['name' => 'observed', 'elem' => array_map(static fn (array $f): array => ['concat' => $f], $observed)]],
+        ]], \JSON_THROW_ON_ERROR);
+    }
+
     public function testEnableReportAppliesAndStatusListsTheFlowsWithTheLinkThatWouldAllowThem(): void
     {
         $this->docker();
