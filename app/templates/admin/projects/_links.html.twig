@@ -1,0 +1,99 @@
+{#- FLE-299: the Links card of the Network tab. Needs: project, links (outgoing, incoming, form, errors, hasTargets). -#}
+{% set form = links.form %}
+<twig:Card data-testid="project-links">
+    <twig:Card:Header>
+        <twig:Card:Title>Links</twig:Card:Title>
+        <twig:Card:Description>With instance isolation on, an instance reaches only its own services. A link lets the instances of this project reach one service of another project, on one port. The target is the instance with the same label, or a fixed one.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        <section class="grid gap-2" aria-labelledby="links-out-heading">
+            <h3 id="links-out-heading" class="text-sm font-medium text-ink-display">This project reaches</h3>
+            {% if links.outgoing|length == 0 %}
+                <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="links-out-empty">No outgoing link.</p>
+            {% else %}
+                <ul class="divide-y divide-hairline rounded-md border border-hairline" data-testid="links-out">
+                    {% for link in links.outgoing %}
+                        <li class="grid gap-2 p-3 text-sm md:grid-cols-[1fr_auto] md:items-center" data-testid="link-row">
+                            <div class="min-w-0 [overflow-wrap:anywhere]">
+                                <a href="{{ path('project_network', {name: link.target.name}) }}" class="font-medium">{{ link.target.name }}</a>
+                                <span class="font-mono" data-testid="link-service">{{ link.service }}:{{ link.port }}</span>
+                                <twig:Badge variant="secondary" data-testid="link-label">{{ link.isSameLabel ? 'same label' : 'label ' ~ link.targetLabel }}</twig:Badge>
+                                {% if link.note %}<span class="block text-ink-body" data-testid="link-note">{{ link.note }}</span>{% endif %}
+                                <span class="block text-xs text-ink-muted">Created by {{ link.createdBy }} · {{ link.createdAt|date('Y-m-d') }}</span>
+                            </div>
+                            <form method="post" action="{{ path('project_link_delete', {name: project.name}) }}" data-turbo="false">
+                                {{ include('setup/_csrf.html.twig') }}
+                                <input type="hidden" name="target" value="{{ link.target.name }}">
+                                <input type="hidden" name="service" value="{{ link.service }}">
+                                <input type="hidden" name="port" value="{{ link.port }}">
+                                <input type="hidden" name="label" value="{{ link.targetLabel }}">
+                                <twig:Dialog id="delete-link-{{ loop.index }}" class="inline-block">
+                                    <twig:Dialog:Trigger>
+                                        <twig:Button type="button" variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_trigger_attrs }} data-testid="link-delete">Delete…</twig:Button>
+                                    </twig:Dialog:Trigger>
+                                    <twig:Dialog:Content>
+                                        <twig:Dialog:Header>
+                                            <twig:Dialog:Title>Delete this link?</twig:Dialog:Title>
+                                            <twig:Dialog:Description>The instances of {{ project.name }} lose access to {{ link.service }}:{{ link.port }} of {{ link.target.name }} at the next isolation pass.</twig:Dialog:Description>
+                                        </twig:Dialog:Header>
+                                        <twig:Dialog:Footer>
+                                            <twig:Dialog:Close>
+                                                <twig:Button type="button" variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                            </twig:Dialog:Close>
+                                            <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="link-delete-confirm">Delete link</twig:Button>
+                                        </twig:Dialog:Footer>
+                                    </twig:Dialog:Content>
+                                </twig:Dialog>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </section>
+
+        <section class="grid gap-2" aria-labelledby="links-in-heading">
+            <h3 id="links-in-heading" class="text-sm font-medium text-ink-display">Reached by</h3>
+            {% if links.incoming|length == 0 %}
+                <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="links-in-empty">No project links to this one.</p>
+            {% else %}
+                <ul class="divide-y divide-hairline rounded-md border border-hairline" data-testid="links-in">
+                    {% for link in links.incoming %}
+                        <li class="p-3 text-sm [overflow-wrap:anywhere]" data-testid="link-in-row">
+                            <a href="{{ path('project_network', {name: link.source.name}) }}" class="inline-flex min-h-11 items-center font-medium md:min-h-0">{{ link.source.name }}</a>
+                            <span class="font-mono">{{ link.service }}:{{ link.port }}</span>
+                            <twig:Badge variant="secondary">{{ link.isSameLabel ? 'same label' : 'label ' ~ link.targetLabel }}</twig:Badge>
+                            {% if link.note %}<span class="block text-ink-body">{{ link.note }}</span>{% endif %}
+                            <span class="block text-xs text-ink-muted">Created by {{ link.createdBy }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </section>
+
+        <twig:Separator />
+
+        <section class="grid gap-3" aria-labelledby="links-new-heading">
+            <h3 id="links-new-heading" class="text-sm font-medium text-ink-display">New link</h3>
+            {% if links.errors|length > 0 %}
+                <twig:Alert variant="destructive" data-testid="links-errors">
+                    {% for error in links.errors %}<p>{{ error }}</p>{% endfor %}
+                </twig:Alert>
+            {% endif %}
+            {% if not links.hasTargets %}
+                <p class="text-sm text-ink-muted" data-testid="links-no-targets">There is no other project to link to yet.</p>
+            {% else %}
+                {{ form_start(form, {attr: {class: 'grid gap-4'}}) }}
+                    {{ include('setup/_csrf.html.twig') }}
+                    {{ form_errors(form) }}
+                    {{ form_row(form.target) }}
+                    {{ form_row(form.service) }}
+                    {{ form_row(form.port) }}
+                    {{ form_row(form.label) }}
+                    {{ form_row(form.note) }}
+                    <p class="text-sm text-ink-muted">Creating a link asks you to confirm your password.</p>
+                    {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                {{ form_end(form, {render_rest: false}) }}
+            {% endif %}
+        </section>
+    </twig:Card:Content>
+</twig:Card>

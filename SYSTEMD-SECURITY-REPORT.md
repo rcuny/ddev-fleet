@@ -14,6 +14,7 @@ Every score is compared with the committed baseline `ci/systemd-security-baselin
 | `firewall-sync.service` | 9.4 | 9.4 | 0.0 | OK |
 | `fleet-backup.service` | 1.4 | 1.4 | 0.0 | OK |
 | `fleet-boot.service` | 9.0 | 9.0 | 0.0 | OK |
+| `fleet-isolation.service` | 3.5 | 3.5 | 0.0 | OK |
 | `fleet-mercure.service` | 8.2 | 8.2 | 0.0 | OK |
 | `fleet-scheduler.service` | 8.3 | 8.3 | 0.0 | OK |
 | `fleet-status.service` | 8.9 | 8.9 | 0.0 | OK |

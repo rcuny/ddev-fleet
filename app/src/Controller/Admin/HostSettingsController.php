@@ -41,6 +41,7 @@ use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
 use App\Form\Host\HostGitIdentityType;
 use App\Form\Host\HostHardeningType;
+use App\Form\Host\HostIsolationPortsType;
 use App\Form\Host\HostJobConcurrencyType;
 use App\Form\Host\HostNotificationType;
 use App\Form\Host\HostPortMirrorType;
@@ -72,6 +73,7 @@ final class HostSettingsController extends AbstractController
         'claude' => 'Claude token',
         'notifications' => 'Notifications',
         'network' => 'Networking',
+        'isolation' => 'Isolation',
         'certificates' => 'Certificates',
         'uploads' => 'Uploads',
         'jobs' => 'Jobs',
@@ -106,6 +108,7 @@ final class HostSettingsController extends AbstractController
         private readonly ClockInterface $clock,
         private readonly \App\Fleet\Host\Docker\DockerSocketCheck $dockerSocket,
         private readonly \App\Fleet\Host\Docker\ToolVersions $toolVersions,
+        private readonly \App\Fleet\Isolation\IsolationStatus $isolationStatus,
     ) {
     }
 
@@ -296,6 +299,42 @@ final class HostSettingsController extends AbstractController
         }
 
         return $this->show('network', $host, $form);
+    }
+
+    /** FLE-299: saves the extra host ports only; the mode itself is changed from the CLI (`fleet host:isolation:enable`). */
+    #[Route('/admin/host/isolation', name: 'settings_isolation', methods: ['POST'])]
+    public function isolation(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        $form = $this->form('isolation', $host);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $raw = $form->get('ports')->getData();
+            $ports = [];
+            $bad = false;
+            foreach (\is_string($raw) ? preg_split('/[\s,]+/', trim($raw), -1, \PREG_SPLIT_NO_EMPTY) ?: [] : [] as $token) {
+                if (!ctype_digit($token) || \strlen($token) > 5 || (int) $token < 1 || (int) $token > 65535) {
+                    $bad = true;
+                    break;
+                }
+                $ports[] = (int) $token;
+            }
+            if ($bad || \count($ports) > 50) {
+                $form->get('ports')->addError(new FormError('Enter TCP ports from 1 to 65535, separated by commas (at most 50).'));
+            } else {
+                $host->changeIsolationHostPorts($ports, $this->clock->now());
+                $this->settings->save($host);
+                $this->audit->record($this->actor(), AuditLog::ISOLATION_HOST_PORTS, implode(',', $host->isolationHostPorts()));
+                $this->addFlash('success', 'Extra host ports saved.');
+
+                return $this->back('isolation');
+            }
+        }
+
+        return $this->show('isolation', $host, $form);
     }
 
     #[Route('/admin/host/uploads', name: 'settings_uploads', methods: ['POST'])]
@@ -539,6 +578,7 @@ final class HostSettingsController extends AbstractController
                 'action' => $this->generateUrl('settings_notifications'),
             ]),
             'network' => $this->createForm(HostPortMirrorType::class, ['enabled' => $host->portMirror()], ['action' => $this->generateUrl('settings_network')]),
+            'isolation' => $this->createForm(HostIsolationPortsType::class, ['ports' => implode(', ', $host->isolationHostPorts())], ['action' => $this->generateUrl('settings_isolation')]),
             'uploads' => $this->createForm(HostUploadLimitType::class, ['megabytes' => intdiv($host->assetUploadMaxBytes(), 1_048_576)], ['action' => $this->generateUrl('settings_uploads')]),
             'capacity' => $this->createForm(HostCapacityType::class, ['reserve' => $host->cpuReserveThreads(), 'maxInstances' => $host->maxInstances()], ['action' => $this->generateUrl('settings_capacity')]),
             'hardening' => $this->createForm(HostHardeningType::class, $this->hardeningData(), ['action' => $this->generateUrl('settings_hardening')]),
@@ -582,6 +622,7 @@ final class HostSettingsController extends AbstractController
             // FLE-310: Docker, compose and DDEV versions against the isolation features' minimums (General tab).
             'toolVersions' => 'general' === $tab ? $this->toolVersions->read() : [],
             'tls' => 'certificates' === $tab ? $this->tlsStatus->read() : null,
+            'isolation' => 'isolation' === $tab ? $this->isolationStatus->build() : null,
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,
             'sshKeys' => 'ssh' === $tab ? $this->sshCatalog->entries() : [],

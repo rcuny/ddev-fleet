@@ -216,6 +216,48 @@ final class InstallerSafetyTest extends TestCase
     }
 
     /**
+     * FLE-299 (owner decision 2026-11-12): instance network isolation is the one deliberate nftables user outside the hardening role.
+     * It owns the table `inet fleet_isolation` only, filters container traffic only (bridge interfaces) and is off until an admin
+     * runs `fleet host:isolation enable`. The exception is narrow: the boot unit, and the lines of the root helper that name that
+     * table (testTheIsolationExceptionStaysNarrow pins what the two files may contain).
+     */
+    private static function isolationException(string $file, string $line): bool
+    {
+        if ($file === self::installDir().'/etc/fleet-isolation.service') {
+            return true;
+        }
+
+        return $file === self::installDir().'/libexec/apply'
+            && 1 === preg_match('/fleet_isolation|ISOLATION_TABLE|nftables\.service|br_netfilter|bridge-nf-call|isolation_bridge_netfilter|"nftables":\[\]|command -v nft /', $line);
+    }
+
+    public function testNothingEnablesOrStartsNftablesService(): void
+    {
+        foreach (self::installFiles() as $file) {
+            $text = (string) file_get_contents($file);
+            self::assertDoesNotMatchRegularExpression('~systemctl\s+(enable|start|restart|reload)[^\n]*nftables~', $text, $file);
+            self::assertDoesNotMatchRegularExpression('~name:\s*nftables(\.service)?\n(\s+\w+:[^\n]*\n)*?\s+(enabled:\s*(true|yes)|state:\s*(started|restarted|reloaded))~', $text, $file);
+        }
+        $units = (string) file_get_contents(self::installDir().'/ansible/roles/units/defaults/main.yml');
+        self::assertStringNotContainsString('nftables', $units);
+    }
+
+    public function testTheIsolationExceptionStaysNarrow(): void
+    {
+        $unit = (string) file_get_contents(self::installDir().'/etc/fleet-isolation.service');
+        $helper = (string) file_get_contents(self::installDir().'/libexec/apply');
+
+        foreach ([$unit, $helper] as $text) {
+            self::assertDoesNotMatchRegularExpression('/flush\s+ruleset|iptables|\bufw\b|sshd|fail2ban|DOCKER-USER|ip_forward/i', (string) preg_replace('/bridge-nf-call-ip6?tables/', '', implode("\n", array_filter(explode("\n", $text), static fn (string $l): bool => !str_starts_with(ltrim($l), '#')))));
+        }
+        self::assertStringContainsString('ConditionPathExists=/etc/ddev-fleet/fleet_isolation.nft', $unit, 'a host with isolation off does nothing at boot');
+        // The ruleset the app renders only filters traffic that enters from container bridges.
+        $ruleset = (string) file_get_contents(\dirname(__DIR__, 2).'/src/Fleet/Isolation/IsolationRuleset.php');
+        self::assertStringNotContainsString('iifname "eth', $ruleset);
+        self::assertStringNotContainsString('oifname "eth', $ruleset);
+    }
+
+    /**
      * @return list<string> "file:line: text" for every non-comment line matching the pattern
      */
     private function grepCode(string $pattern): array
@@ -227,6 +269,9 @@ final class InstallerSafetyTest extends TestCase
                 continue;
             }
             foreach (self::codeLines($file) as $number => $line) {
+                if (self::isolationException($file, $line)) {
+                    continue;
+                }
                 if (1 === preg_match($pattern, $line)) {
                     $hits[] = str_replace(self::installDir().'/', '', $file).':'.$number.': '.trim($line);
                 }

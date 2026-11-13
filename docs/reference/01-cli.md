@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (103), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (110), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -98,6 +98,66 @@ fleet project:delete [-y|--yes] [--format FORMAT] [--json] [--] <name>
 | Option | Shortcut | Description | Default |
 |---|---|---|---|
 | `--yes` | `-y` | Do not ask for confirmation |  |
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet project:link:create
+
+Allow the web containers of one project to reach a service port of another (one way, applied by host isolation).
+
+```
+fleet project:link:create [--service SERVICE] [--port PORT] [--label LABEL] [--note NOTE] [--format FORMAT] [--json] [--] <source> <target>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `source` | yes | The project whose web containers may open the connection |
+| `target` | yes | The project that is reached |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--service=VALUE` |  | The compose service of the target (default web) | `web` |
+| `--port=VALUE` |  | The TCP port of that service |  |
+| `--label=VALUE` |  | "same" (the target instance with the source instance's label) or a fixed instance label | `same` |
+| `--note=VALUE` |  | Why this link exists (shown on both projects) | `` |
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet project:link:delete
+
+Remove a declared link (its network is removed by the next isolation pass).
+
+```
+fleet project:link:delete [--service SERVICE] [--port PORT] [--label LABEL] [--format FORMAT] [--json] [--] <source> <target>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `source` | yes | The project whose web containers may open the connection |
+| `target` | yes | The project that is reached |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--service=VALUE` |  | The compose service of the target (default web) | `web` |
+| `--port=VALUE` |  | The TCP port of that service |  |
+| `--label=VALUE` |  | "same" (the target instance with the source instance's label) or a fixed instance label | `same` |
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet project:link:list
+
+List the declared links between projects (of one project, outgoing and incoming).
+
+```
+fleet project:link:list [--format FORMAT] [--json] [--] [<project>]
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `project` | no | Only the links of this project |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
 | `--json` |  | Same as --format=json |  |
 
@@ -1445,6 +1505,55 @@ fleet host:init [--domain DOMAIN] [--acme-email ACME-EMAIL] [--tls-mode TLS-MODE
 | `--acme-email=VALUE` |  | Contact address for Let's Encrypt (optional) |  |
 | `--tls-mode=VALUE` |  | How certificates are obtained: http01 (default for a new host) or ovh_dns |  |
 | `--force` |  | Allow changing the domain or the TLS mode after setup is complete |  |
+
+### fleet host:isolation:check
+
+Probe from inside running instances what is reachable and compare it with what the mode expects.
+
+```
+fleet host:isolation:check [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--json` |  | Print the result as JSON |  |
+
+### fleet host:isolation:disable
+
+Turn instance network isolation off: the nftables table is deleted at once, nothing restarts.
+
+```
+fleet host:isolation:disable [--remove-links]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--remove-links` |  | Also remove the fleet-link-* Docker networks |  |
+
+### fleet host:isolation:enable
+
+Turn instance network isolation on in report mode (records flows, cuts nothing) or enforce mode (drops what no link allows).
+
+```
+fleet host:isolation:enable [--mode MODE] [-y|--yes]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--mode=VALUE` |  | report or enforce | `report` |
+| `--yes` | `-y` | Confirm enforce (required) |  |
+
+### fleet host:isolation:status
+
+Show the instance network isolation: mode, table, links and the flows recorded (the links `enforce` would need).
+
+```
+fleet host:isolation:status [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--json` |  | Print the status as JSON |  |
 
 ### fleet host:job-concurrency
 

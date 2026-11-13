@@ -42,6 +42,7 @@ final class RouterConverger
         private readonly TraefikDirectory $traefik,
         private readonly float $healthWait = 60.0,
         ?\Closure $sleep = null,
+        private readonly ?\App\Fleet\Isolation\IsolationConverger $network = null,
     ) {
         $this->sleep = $sleep ?? static function (float $seconds): void {
             usleep((int) ($seconds * 1_000_000));
@@ -178,10 +179,20 @@ final class RouterConverger
     private function restartRouter(): bool
     {
         try {
-            return $this->runner->run(['docker', 'restart', self::ROUTER], null, [], null, self::RESTART_TIMEOUT)->isSuccess();
+            $restarted = $this->runner->run(['docker', 'restart', self::ROUTER], null, [], null, self::RESTART_TIMEOUT)->isSuccess();
         } catch (\Throwable) {
             return false;
         }
+        if ($restarted) {
+            // FLE-299: the router has a new address; refresh the ruleset's router set before anything else relies on the router.
+            try {
+                $this->network?->pass();
+            } catch (\Throwable) {
+                // The watcher's next pass retries.
+            }
+        }
+
+        return $restarted;
     }
 
     private function routerHealthy(): bool

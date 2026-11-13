@@ -110,6 +110,14 @@ class HostSettings
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
 
+    /** FLE-299: instance network isolation of this host; off until an admin turns it on, never exported or imported. */
+    #[ORM\Column(type: Types::STRING, length: 16, enumType: IsolationMode::class, options: ['default' => 'off'])]
+    private IsolationMode $isolationMode = IsolationMode::Off;
+
+    /** FLE-299: extra host TCP ports the containers may reach in enforce mode (JSON list of ints), the escape hatch of the allow-list. */
+    #[ORM\Column(type: Types::TEXT, options: ['default' => '[]'])]
+    private string $isolationHostPorts = '[]';
+
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $updatedAt;
 
@@ -279,6 +287,43 @@ class HostSettings
         }
         $this->cpuReserveThreads = $cpuReserveThreads;
         $this->maxInstances = $maxInstances;
+        $this->touch($now);
+    }
+
+    public function isolationMode(): IsolationMode
+    {
+        return $this->isolationMode;
+    }
+
+    public function changeIsolationMode(IsolationMode $mode, \DateTimeImmutable $now): void
+    {
+        $this->isolationMode = $mode;
+        $this->touch($now);
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function isolationHostPorts(): array
+    {
+        $ports = json_decode($this->isolationHostPorts, true);
+
+        return \is_array($ports) ? array_values(array_filter($ports, static fn (mixed $p): bool => \is_int($p) && $p >= 1 && $p <= 65535)) : [];
+    }
+
+    /**
+     * @param list<int> $ports
+     */
+    public function changeIsolationHostPorts(array $ports, \DateTimeImmutable $now): void
+    {
+        foreach ($ports as $port) {
+            if ($port < 1 || $port > 65535) {
+                throw new \InvalidArgumentException('A host port must be between 1 and 65535.');
+            }
+        }
+        $ports = array_values(array_unique($ports));
+        sort($ports);
+        $this->isolationHostPorts = json_encode($ports, \JSON_THROW_ON_ERROR);
         $this->touch($now);
     }
 

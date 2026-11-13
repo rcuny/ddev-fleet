@@ -42,6 +42,10 @@ final readonly class AuditLog
     public const string PROJECT_IMPORT = 'project.import';
 
     public const string DB_ISOLATION_DISCONNECT = 'isolation.db-disconnect';
+    public const string ISOLATION_MODE = 'isolation.mode';
+    public const string ISOLATION_HOST_PORTS = 'isolation.host-ports';
+    public const string PROJECT_LINK_CREATE = 'project.link-create';
+    public const string PROJECT_LINK_DELETE = 'project.link-delete';
     public const string PROJECT_CONTAINER_SSH = 'project.container-ssh';
 
     public const string SSH_KEY_CREATE = 'ssh.key.create';

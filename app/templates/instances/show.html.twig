@@ -44,6 +44,22 @@
                     <div><dt class="text-sm text-ink-muted">Head</dt><dd>{{ instance.headSha ? instance.headSha|slice(0, 7) : 'Not recorded' }}</dd></div>
                     <div><dt class="text-sm text-ink-muted">Memory</dt><dd>{{ instance.ramMib is not null ? instance.ramMib ~ ' MiB' : 'Not recorded' }}</dd></div>
                     <div><dt class="text-sm text-ink-muted">Requested by</dt><dd>{{ instance.requestedBy }}</dd></div>
+                    {% if links|length > 0 %}
+                        <div class="sm:col-span-2" data-testid="instance-links">
+                            <dt class="text-sm text-ink-muted">Links</dt>
+                            <dd>
+                                <ul class="grid gap-1">
+                                    {% for link in links %}
+                                        <li class="[overflow-wrap:anywhere]" data-testid="instance-link" data-state="{{ link.isLive ? 'live' : 'pending' }}">
+                                            <span class="font-mono">{{ link.alias }}:{{ link.port }}</span> (<a href="{{ path('instance_show', {id: link.targetInstance}) }}">{{ link.targetInstance }}</a>)
+                                            <twig:Badge variant="{{ link.isLive ? 'default' : 'secondary' }}">{{ link.isLive ? 'live' : 'pending' }}</twig:Badge>
+                                            {% if link.pending %}<span class="text-sm text-ink-muted">{{ link.pending }}</span>{% endif %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </dd>
+                        </div>
+                    {% endif %}
                     {% if mailpit %}
                         <div data-testid="mailpit-credentials">
                             <dt class="text-sm text-ink-muted">Mailpit login</dt>

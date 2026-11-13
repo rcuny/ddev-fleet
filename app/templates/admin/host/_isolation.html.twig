@@ -1,0 +1,89 @@
+{% set form = forms.isolation %}
+{% set status = isolation %}
+<twig:Card data-testid="host-tab-isolation">
+    <twig:Card:Header>
+        <twig:Card:Title>Instance network isolation</twig:Card:Title>
+        <twig:Card:Description>A host firewall table keeps the instances of this host from reaching each other, except through the links declared on the projects' Network tabs. The mode is changed from the command line on purpose; this page shows the state and saves the extra host ports.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        <dl class="grid gap-4 sm:grid-cols-2">
+            <div>
+                <dt class="text-sm text-ink-muted">Mode</dt>
+                <dd><twig:Badge variant="{{ status.mode == 'enforce' ? 'default' : 'secondary' }}" data-testid="isolation-mode" data-mode="{{ status.mode }}">{{ status.mode }}</twig:Badge></dd>
+            </div>
+            <div>
+                <dt class="text-sm text-ink-muted">Firewall table</dt>
+                <dd data-testid="isolation-table">{{ not status.docker ? 'Unknown (Docker did not answer)' : (not status.table.readable ? 'Could not be read' : (status.table.installed ? 'Installed' : 'Not installed')) }}</dd>
+            </div>
+            <div>
+                <dt class="text-sm text-ink-muted">Host ports instances may reach</dt>
+                <dd class="font-mono text-sm" data-testid="isolation-host-ports">{{ status.hostPorts|join(', ') }}{% if status.extraHostPorts|length > 0 %}, {{ status.extraHostPorts|join(', ') }}{% endif %}</dd>
+            </div>
+        </dl>
+
+        {% if status.problems|length > 0 %}
+            <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="isolation-problems">
+                <twig:ux:icon name="lucide:triangle-alert" />
+                <twig:Alert:Title>Problems found</twig:Alert:Title>
+                <twig:Alert:Description class="text-ink-body">
+                    <ul class="grid list-disc gap-1 ps-5">
+                        {% for problem in status.problems %}<li>{{ problem }}</li>{% endfor %}
+                    </ul>
+                </twig:Alert:Description>
+            </twig:Alert>
+        {% endif %}
+
+        <twig:Separator />
+
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-isolation-ports-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.ports) }}
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+
+        <twig:Separator />
+
+        <section class="grid gap-2" aria-labelledby="isolation-flows-heading">
+            <h3 id="isolation-flows-heading" class="text-sm font-medium text-ink-display">Recorded flows</h3>
+            {% if status.flows|length == 0 %}
+                <p class="text-sm text-ink-muted" data-testid="isolation-flows-empty">No flow recorded between instances.</p>
+            {% else %}
+                <ul class="divide-y divide-hairline rounded-md border border-hairline" data-testid="isolation-flows">
+                    {% for flow in status.flows %}
+                        <li class="grid gap-1 p-3 text-sm [overflow-wrap:anywhere]" data-testid="isolation-flow">
+                            <span><span class="font-mono">{{ flow.source }}</span> to <span class="font-mono">{{ flow.target }}:{{ flow.port }}</span>
+                                {% if flow.covered %}<twig:Badge variant="secondary">covered by a link</twig:Badge>{% endif %}</span>
+                            {% if flow.suggestion %}<code class="break-all text-xs" data-testid="isolation-suggestion">{{ flow.suggestion }}</code>{% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </section>
+
+        <section class="grid gap-2" aria-labelledby="isolation-links-heading">
+            <h3 id="isolation-links-heading" class="text-sm font-medium text-ink-display">Links</h3>
+            {% if status.links|length == 0 %}
+                <p class="text-sm text-ink-muted" data-testid="isolation-links-empty">No link resolves to an instance yet.</p>
+            {% else %}
+                <ul class="divide-y divide-hairline rounded-md border border-hairline" data-testid="isolation-links">
+                    {% for link in status.links %}
+                        <li class="p-3 text-sm [overflow-wrap:anywhere]" data-testid="isolation-link" data-state="{{ link.state }}">
+                            <span class="font-mono">{{ link.source }}</span> to <span class="font-mono">{{ link.target }}/{{ link.service }}:{{ link.port }}</span>
+                            <twig:Badge variant="{{ link.state == 'live' ? 'default' : 'secondary' }}">{{ link.state }}</twig:Badge>
+                            {% if link.reason %}<span class="block text-ink-muted">{{ link.reason }}</span>{% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </section>
+
+        <section class="grid gap-2" aria-labelledby="isolation-cli-heading" data-testid="isolation-cli">
+            <h3 id="isolation-cli-heading" class="text-sm font-medium text-ink-display">Change the mode (on the host)</h3>
+            <p class="text-sm text-ink-muted">Start with report: it logs the flows without blocking. Declare the links the recorded flows need, then enforce.</p>
+            <pre class="overflow-x-auto rounded-md border border-hairline p-3 text-xs"><code>fleet host:isolation:enable --mode=report
+fleet host:isolation:enable --mode=enforce --yes</code></pre>
+            <p class="text-sm text-ink-muted">Rollback, at any time:</p>
+            <pre class="overflow-x-auto rounded-md border border-hairline p-3 text-xs"><code>fleet host:isolation:disable</code></pre>
+        </section>
+    </twig:Card:Content>
+</twig:Card>

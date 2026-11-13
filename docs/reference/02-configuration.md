@@ -95,6 +95,20 @@ The browser and the commands apply the same rules and refuse a bad value with th
 | Access | `gated` (login, default) or `public`; applies to every project using the port. |
 | Seeded entry | One migration entry, `typesense` (public `9108`, router `8108`, public access), unless those names or numbers are taken. |
 
+### Network link
+
+Declared with `fleet project:link:create <source> <target>` or on the project's Network tab; see [network isolation](17-instance-isolation.md#declaring-a-link).
+
+| Field | Rule |
+|---|---|
+| `source`, `target` | Existing projects, different from each other. |
+| `service` | A compose service name (name rule above, default `web`). |
+| `port` | One TCP port, 1 to 65535. |
+| `label` | `same` (default) or a fixed instance label (name rule above). |
+| `note` | Up to 500 characters; shown on both projects. |
+
+The host setting *extra host ports* (Settings → Isolation) is a list of TCP ports, 1 to 65535, that containers may reach on the host in enforce mode.
+
 ### Issue id patterns
 
 This one bites. The pattern finds the issue id in an instance label, then in the branch name, for example `(?:ABC|XYZ)-\d{1,6}`. It is a case-insensitive PCRE **without delimiters** (no `~`), max 200 characters. If it has a first group, that group is the id, otherwise the whole match; the id is upper-cased. Because the server runs it, backreferences, `\Q...\E`, recursion, callouts, conditionals, comments and nested repetition such as `(a+)+` are refused. The id must also be safe to use as a path or command word (letters, digits, `.`, `_`, `-`, no `..`); otherwise no `[[issue-id]]` is set. The Source tab has a tester.

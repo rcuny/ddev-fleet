@@ -25,6 +25,7 @@ final readonly class SystemRenderer
         'slices' => ['slices.json'],
         'provision' => ['host-vars.yml'],
         'drift' => [], // read-only: nothing is ever staged
+        'isolation' => ['fleet_isolation.nft'],
     ];
 
     public function __construct(

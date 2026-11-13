@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root helper of ddev-fleet: installs config that the app has rendered into its staging directory.
 #
-#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision|drift>
+#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision|drift|isolation>
 #
 # Installed by the Ansible role privileged as root:root 0755, reachable by the `fleet` user through one sudoers
 # line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
@@ -50,6 +50,14 @@
 # `apply drift` (FLE-261) is the read-only twin of `provision`: the installed tag's playbook with --check --diff, nothing
 # staged, nothing installed, the report (JSON between marker lines) on stdout. See apply_drift below.
 #
+# `apply isolation` (FLE-299) installs the staged nftables ruleset of instance network isolation, or, with nothing staged,
+# prints the live table (`nft -j list table inet fleet_isolation`, read-only, `{"nftables":[]}` when it does not exist).
+# The staged fleet_isolation.nft is validated line by line (a closed character set; only the one table `inet fleet_isolation`
+# may be named; no include/flush/add/insert/create/replace/rename/destroy/define/export/import/reset/restore), checked with
+# `nft -c -f` and installed with `nft -f`, which is atomic: a failure leaves the previous table untouched. A ruleset with
+# content is also kept as /etc/ddev-fleet/fleet_isolation.nft for the boot unit fleet-isolation.service; the "disable" form
+# (the table is only deleted) removes that file. Roll back by hand: `nft delete table inet fleet_isolation`.
+#
 # Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
 # half-written or invalid config from reaching Caddy or Authelia; it is not a security boundary.
 #
@@ -58,7 +66,7 @@
 set -euo pipefail
 
 # The only targets. A repo test keeps this word list equal to App\Fleet\System\ApplyTarget and to the sudoers line.
-ALLOWED_TARGETS='caddy authelia slices provision drift'
+ALLOWED_TARGETS='caddy authelia slices provision drift isolation'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
 readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
@@ -98,11 +106,11 @@ fail() {
 }
 
 # --- 1. arguments: exactly one known target -------------------------------------------------------------------
-[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision|drift>' 64
+[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision|drift|isolation>' 64
 TARGET=$1
 case " $ALLOWED_TARGETS " in
   *" $TARGET "*) ;;
-  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision|drift>)' 64 ;;
+  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision|drift|isolation>)' 64 ;;
 esac
 
 # --- 2. who may run this, and where the files are ---------------------------------------------------------------
@@ -150,6 +158,7 @@ case $TARGET in
   slices) STAGED_NAMES='slices.json' ;;
   provision) STAGED_NAMES='host-vars.yml' ;;
   drift) STAGED_NAMES='' ;;
+  isolation) STAGED_NAMES='fleet_isolation.nft' ;;
 esac
 readonly STAGED_NAMES
 
@@ -909,6 +918,189 @@ apply_drift() {
   fi
 }
 
+# --- isolation: the nftables table of instance network isolation (FLE-299) -------------------------------------------
+readonly ISOLATION_TABLE='inet fleet_isolation'
+readonly T_NFT=15
+
+# isolation_validate <file>: an ALLOWLIST. The file must be exactly what IsolationRuleset renders: line 1 and 2 are fixed,
+# then (for the enabled form) the one table `inet fleet_isolation` with `set` and `chain` blocks whose every line matches one
+# of the patterns below, and nothing after the table's closing brace. Any other line, at any level, is refused: no other
+# table, no bare chain, rule, set or element line outside a block, no statement that is not listed.
+isolation_validate() {
+  local file=$1 line n=0 state=head1
+  local ifn='[a-z0-9-]{1,15}' ifw='[a-z0-9*-]{1,15}' ip='[0-9]{1,3}(\.[0-9]{1,3}){3}'
+  local fwd="    iifname \"$ifn\" oifname \"$ifn\" (ip saddr @routers accept|ip daddr @routers tcp dport @router_ports accept|ip protocol icmp accept|meta l4proto ipv6-icmp accept|ct state new update @observed \{ ip saddr \. ip daddr \. tcp dport timeout 4h \}|ct state new counter (accept|drop)|ip saddr $ip ip daddr $ip tcp dport [0-9]{1,5} ct state new accept|ct state new drop)"
+  local inp="    iifname \"$ifw\" (ct state established,related accept|tcp dport @host_ports accept|udp dport 53 accept|ip protocol icmp accept|meta l4proto ipv6-icmp accept|ct state new update @observed_host \{ ip saddr \. tcp dport timeout 4h \}|ct state new counter (accept|drop))"
+  local elem='[0-9.]+( \. [0-9.]+)*'
+  local chain='' elements=0
+  if [ "$(wc -L <"$file")" -gt 300 ]; then
+    fail 'the staged ruleset has a very long line' 65
+  fi
+  if LC_ALL=C grep -Eqv '^[A-Za-z0-9 _.,;:#@{}()*"<>=!/-]*$' "$file"; then
+    fail 'the staged ruleset has an unacceptable character' 65
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    case $state in
+      head1)
+        [ "$line" = 'table inet fleet_isolation {}' ] || fail 'the staged ruleset must start with "table inet fleet_isolation {}"' 65
+        state=head2
+        ;;
+      head2)
+        [ "$line" = 'delete table inet fleet_isolation' ] || fail 'the staged ruleset must delete the table on its second line' 65
+        state=top
+        ;;
+      top)
+        [ "$line" = 'table inet fleet_isolation {' ] || fail "the staged ruleset has a line outside the table (line $n)" 65
+        state=table
+        ;;
+      table)
+        if [[ $line =~ ^\ \ set\ (routers|host_ports|router_ports|observed|observed_host)\ \{$ ]]; then
+          state=set
+        elif [[ $line =~ ^\ \ chain\ (forward|input)\ \{$ ]]; then
+          state=chain
+          chain=${BASH_REMATCH[1]}
+        elif [ "$line" = '}' ]; then
+          state=done
+        else
+          fail "the staged ruleset has a line that is not a set or chain block (line $n)" 65
+        fi
+        ;;
+      set)
+        if [ "$line" = '  }' ]; then
+          state=table
+        elif [[ $line =~ ^\ \ \ \ type\ (ipv4_addr|inet_service|ipv4_addr\ \.\ inet_service|ipv4_addr\ \.\ ipv4_addr\ \.\ inet_service)\;$ ]] ||
+          [ "$line" = '    flags dynamic,timeout;' ] || [ "$line" = '    timeout 4h;' ] ||
+          [[ $line =~ ^\ \ \ \ size\ [0-9]{1,6}\;$ ]] ||
+          [ "$line" = '    elements = {' ]; then
+          [ "$line" != '    elements = {' ] || state=elements
+        else
+          fail "the staged ruleset has an unacceptable set line (line $n)" 65
+        fi
+        ;;
+      elements)
+        # One element per line, a comma after every one but the last; at most 5000 (the file is also capped at 256 KiB).
+        if [ "$line" = '    }' ]; then
+          state=set
+        elif [[ $line =~ ^\ \ \ \ \ \ $elem,?$ ]]; then
+          elements=$((elements + 1))
+          [ "$elements" -le 5000 ] || fail 'the staged ruleset has too many set elements' 65
+        else
+          fail "the staged ruleset has an unacceptable set element (line $n)" 65
+        fi
+        ;;
+      chain)
+        if [ "$line" = '  }' ]; then
+          state=table
+        elif [[ $line =~ ^\ \ \ \ type\ filter\ hook\ (forward|input)\ priority\ -10\;\ policy\ accept\;$ ]] ||
+          [ "$line" = '    ct state established,related accept' ] ||
+          [[ $line =~ ^\ \ \ \ \#\ [A-Za-z0-9\ ._\>/:\(\)-]{0,200}$ ]]; then
+          :
+        elif [ "$chain" = forward ] && [[ $line =~ ^$fwd$ ]]; then
+          :
+        elif [ "$chain" = input ] && [[ $line =~ ^$inp$ ]]; then
+          :
+        else
+          fail "the staged ruleset has an unacceptable rule (line $n)" 65
+        fi
+        ;;
+      done)
+        fail "the staged ruleset has content after the table (line $n)" 65
+        ;;
+    esac
+  done <"$file"
+  case $state in
+    top | done) ;;
+    *) fail 'the staged ruleset ends inside a block' 65 ;;
+  esac
+}
+
+# isolation_nftables_service_guard: Debian's nftables.service loads a file that begins with `flush ruleset` and flushes the
+# whole ruleset when it stops or reloads, which would wipe Docker's, ufw's and our table. We never enable it, and we refuse to
+# load a ruleset while it is enabled or active.
+isolation_nftables_service_guard() {
+  local state
+  for state in is-enabled is-active; do
+    case $(systemctl "$state" nftables.service 2>/dev/null </dev/null || true) in
+      enabled | active)
+        fail 'nftables.service is enabled or active: it flushes the whole ruleset (the Docker tables and fleet_isolation) when it stops or reloads. Run "systemctl disable --now nftables.service" first; Fleet never enables it' 69
+        ;;
+    esac
+  done
+}
+
+# isolation_bridge_netfilter: the table filters traffic between two containers of one bridge, and the kernel only shows that
+# traffic to nftables with br_netfilter loaded and net.bridge.bridge-nf-call-iptables (and -ip6tables) at 1. A stock Debian
+# host has neither. Load the module now, keep both settings across reboots (/etc/modules-load.d, /etc/sysctl.d), and refuse
+# to install a ruleset that would silently filter nothing.
+isolation_bridge_netfilter() {
+  local key
+  modprobe br_netfilter >/dev/null 2>&1 </dev/null || true
+  sysctl -q -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 >/dev/null 2>&1 </dev/null || true
+  for key in bridge-nf-call-iptables bridge-nf-call-ip6tables; do
+    [ "$(cat "$ROOT/proc/sys/net/bridge/$key" 2>/dev/null || true)" = 1 ] ||
+      fail "br_netfilter is not active (net.bridge.$key is not 1): without it the table cannot see traffic inside a bridge, so enforce would filter nothing. Nothing was changed" 69
+  done
+}
+
+# isolation_write_if_changed <path> <mode> <content>: replaces the file atomically, and only when its content differs, so a
+# pass that changes nothing (the watcher's) never writes under /etc. A failed write stops the apply BEFORE the table is touched.
+isolation_write_if_changed() {
+  local path="$1" mode="$2" content="$3"
+  [ "$(cat "$path" 2>/dev/null || true)" = "$content" ] && return 0
+  mkdir -p -- "$(dirname -- "$path")" 2>/dev/null || fail "cannot create $(dirname -- "$path") (nothing was changed)" 70
+  printf '%s\n' "$content" >"$path.new" 2>/dev/null || fail "cannot write $path (nothing was changed)" 70
+  chmod "$mode" "$path.new" && mv -f -- "$path.new" "$path" || fail "cannot install $path (nothing was changed)" 70
+}
+
+isolation_persist() {
+  isolation_write_if_changed "$ROOT/etc/modules-load.d/fleet-isolation.conf" 0644 '# Managed by ddev-fleet (apply isolation).
+br_netfilter'
+  isolation_write_if_changed "$ROOT/etc/sysctl.d/90-fleet-isolation.conf" 0644 '# Managed by ddev-fleet (apply isolation).
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1'
+}
+
+apply_isolation() {
+  local conf="$ROOT$PROVISION_ETC/fleet_isolation.nft" lines
+  command -v nft >/dev/null 2>&1 || fail 'nft is not installed (apt install nftables)' 69
+  if ! stage_in fleet_isolation.nft "$PRIV/fleet_isolation.nft"; then
+    # Nothing staged: the read-only report.
+    if timeout "$T_NFT" nft -j list table $ISOLATION_TABLE 2>/dev/null </dev/null; then
+      return 0
+    fi
+    printf '{"nftables":[]}\n'
+    return 0
+  fi
+  isolation_validate "$PRIV/fleet_isolation.nft"
+  if [ "$(sed -e '1,2d' "$PRIV/fleet_isolation.nft" | wc -l)" -gt 0 ]; then
+    isolation_nftables_service_guard
+    isolation_bridge_netfilter
+  fi
+  timeout "$T_NFT" nft -c -f "$PRIV/fleet_isolation.nft" </dev/null || fail 'nft refused the staged ruleset (nothing was changed)' 65
+  lines=$(sed -e '1,2d' -e '/^[[:space:]]*$/d' "$PRIV/fleet_isolation.nft" | wc -l)
+  # Every file first (a failure here leaves the live table exactly as it was), then the one atomic nft transaction.
+  if [ "$lines" -gt 0 ]; then
+    isolation_persist
+    mkdir -p -- "$ROOT$PROVISION_ETC" 2>/dev/null || fail "cannot create $ROOT$PROVISION_ETC (nothing was changed)" 70
+    install -m 0644 "$PRIV/fleet_isolation.nft" "$conf.new" 2>/dev/null || fail "cannot write $conf (nothing was changed)" 70
+  else
+    rm -f -- "$conf" "$ROOT/etc/modules-load.d/fleet-isolation.conf" "$ROOT/etc/sysctl.d/90-fleet-isolation.conf" ||
+      fail 'cannot remove the isolation files under /etc (the live table was left as it is)' 70
+  fi
+  timeout "$T_NFT" nft -f "$PRIV/fleet_isolation.nft" </dev/null || {
+    rm -f -- "$conf.new"
+    fail 'fleet_isolation: nft could not load the ruleset (the previous table is unchanged)'
+  }
+  # The boot copy replaces the old one only after the load worked (it was written beside it above, so this is a rename).
+  [ "$lines" -gt 0 ] && mv -f -- "$conf.new" "$conf"
+  if [ "$lines" -gt 0 ]; then
+    printf 'apply: isolation ruleset installed\n'
+  else
+    printf 'apply: isolation table removed\n'
+  fi
+}
+
 pin_staging || true
 case $TARGET in
   caddy) apply_caddy ;;
@@ -916,4 +1108,5 @@ case $TARGET in
   slices) apply_slices ;;
   provision) apply_provision ;;
   drift) apply_drift ;;
+  isolation) apply_isolation ;;
 esac
