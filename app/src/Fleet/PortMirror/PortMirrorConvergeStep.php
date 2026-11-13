@@ -32,7 +32,7 @@ final readonly class PortMirrorConvergeStep implements DeployStep
         // FLE-307: the router repair starts the project again and restarts the router; DDEV may re-attach the db.
         // converge() never throws, so the isolation check always runs and its failure is the job's failure.
         $this->converge($context);
-        $this->preStart->verifyStarted($context->instance, $context->dir, $context->log);
+        $this->preStart->verifyStarted($context->instance, $context->dir, $context->log, accounts: false);
     }
 
     private function converge(DeployContext $context): void

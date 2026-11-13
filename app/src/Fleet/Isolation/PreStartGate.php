@@ -116,16 +116,20 @@ final readonly class PreStartGate
 
     /**
      * FLE-297: call it after every successful `ddev start` or `ddev restart`. Disconnects the db (and other non-web) containers
-     * from the shared ddev_default network, FLE-307 (see InstanceDbIsolationWriter::converge()).
+     * from the shared ddev_default network, FLE-307 (see InstanceDbIsolationWriter::converge()). `$accounts` false skips the
+     * database account steps (FLE-324 lock, FLE-331 socket user) when they already ran in this job (FLE-332).
      *
      * @throws JobFailed
      */
-    public function verifyStarted(Instance $instance, string $dir, JobLog $log): void
+    public function verifyStarted(Instance $instance, string $dir, JobLog $log, bool $accounts = true): void
     {
         try {
             $this->dbIsolation?->converge($instance->id(), $log->line(...));
         } catch (\RuntimeException $e) {
             throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
+        }
+        if (!$accounts) {
+            return; // FLE-332: a second pass in the same deploy (router repair) only re-checks the network; the accounts live in the db volume
         }
         // FLE-324: root of the database is closed to the network (db/db stays for DDEV's tooling). A warning, never a failure.
         $this->dbIsolation?->lockRoot($instance->id(), $log->line(...));
