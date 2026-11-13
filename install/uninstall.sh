@@ -170,6 +170,7 @@ main() {
     do_cmd systemctl disable --now "$unit"
   done
   do_cmd systemctl disable --now fleet-status.service
+  do_cmd systemctl disable --now fleet-isolation-watch.service
   do_cmd systemctl disable fleet-boot.service
   do_cmd systemctl disable --now fleet-scheduler.service
   do_cmd systemctl disable --now fleet-backup.timer
@@ -184,6 +185,7 @@ main() {
   say "==> removing units and configuration"
   remove_file "${systemd_dir:?}/fleet-worker@.service"
   remove_file "${systemd_dir:?}/fleet-status.service"
+  remove_file "${systemd_dir:?}/fleet-isolation-watch.service"
   remove_file "${systemd_dir:?}/fleet-boot.service"
   remove_file "${systemd_dir:?}/fleet-scheduler.service"
   remove_file "${systemd_dir:?}/fleet-backup.service"

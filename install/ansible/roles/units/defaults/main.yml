@@ -1,6 +1,6 @@
 ---
 # Unit files copied from install/etc/ into the systemd directory, grouped by what a change must restart.
-units_worker: [fleet-worker@.service, fleet-status.service]
+units_worker: [fleet-worker@.service, fleet-status.service, fleet-isolation-watch.service]
 units_scheduler: [fleet-scheduler.service]
 units_mercure: [fleet-mercure.service]
 # Written, never restarted by a change (a timer or a oneshot picks the new file up by itself; fleet-tmux must not end
@@ -22,6 +22,7 @@ units_enable:
   - fleet-worker@1
   - fleet-scheduler
   - fleet-status
+  - fleet-isolation-watch
   - fleet-isolation
   - fleet-boot
   - caddy

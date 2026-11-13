@@ -30,6 +30,7 @@ When something misbehaves, you need to know where Fleet keeps things and what ru
 | `fleet-worker@1` | The job worker. Run **exactly one**: never enable `fleet-worker@2`; the SQLite queue allows one consumer. Raise concurrency in the host settings (Jobs tab) instead. |
 | `fleet-scheduler` | Schedule ticker (every 30 seconds): fires due schedules. |
 | `fleet-status` | Status watcher (every 10 seconds): keeps instance states true, reaps dead jobs, prunes old ones. |
+| `fleet-isolation-watch` | Docker events listener: re-applies the instance isolation rules about a second after a ddev container or the shared / link networks change (`fleet host:isolation:watch`). |
 | `fleet-boot` | Oneshot after a reboot: `fleet:instance:start --all --sequential`, so instances start one at a time. |
 | `fleet-tmux` | Owns the `fleet` tmux session (the tmux workspace) in its own cgroup. |
 | `fleet-mercure` | The Mercure hub for live updates (loopback). |

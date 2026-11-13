@@ -70,14 +70,14 @@
   loop: >-
     {{ ['fleet-worker@1.service'] +
     (units_workers.stdout_lines | map('split', ' ') | map('first') | reject('equalto', 'fleet-worker@1.service') | list) +
-    ['fleet-status.service'] }}
+    ['fleet-status.service', 'fleet-isolation-watch.service'] }}
   when: units_worker_restart
 
 - name: Start the worker and the status watcher
   ansible.builtin.systemd_service:
     name: "{{ item }}"
     state: started
-  loop: [fleet-worker@1.service, fleet-status.service]
+  loop: [fleet-worker@1.service, fleet-status.service, fleet-isolation-watch.service]
   when: not units_worker_restart
 
 # The schedule ticker runs the same code and environment as the workers.

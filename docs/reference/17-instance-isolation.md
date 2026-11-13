@@ -126,15 +126,15 @@ Debian's `nftables.service`, when enabled, loads a file that begins with `flush 
 
 ### After a plain `docker restart ddev-router`
 
-A restart that Fleet does itself refreshes the router's address in the table at once. A restart done by hand (or by DDEV) gives the router a new address that the table learns at the next pass: the status watcher notices the change within about two minutes, and in `enforce` mode the sites answer 502 from Caddy until then (measured on a throwaway host: up to about 3 minutes, mostly the watcher interval). This is the accepted window; the Docker events listener (a planned follow-up) closes it. Restart the router through Fleet (a start of any instance), or run `fleet host:isolation:enable --mode=enforce --yes` to force a pass.
+A restart that Fleet does itself refreshes the router's address in the table at once. A restart done by hand (or by DDEV) gives the router a new address that the table learns at the next pass: the status watcher notices the change within about two minutes, and in `enforce` mode the sites answer 502 from Caddy until then (measured on a throwaway host: up to about 3 minutes, mostly the watcher interval). The unit `fleet-isolation-watch` closes that window: it listens to `docker events` and runs a pass about a second after a ddev container or the `ddev_default` / `fleet-link-*` networks change (a plain `docker restart ddev-router` recovers in about a second; a router that comes back with a new address, within a second or two). If the unit is down, the status watcher's two-minute pass is the backstop. Check it with `systemctl status fleet-isolation-watch` and `journalctl -u fleet-isolation-watch`; to force a pass by hand run `fleet host:isolation:enable --mode=enforce --yes`.
 
 ### What it does not do
 
 - **The router stays reachable from instances.** An instance can still ask `ddev-router` for another instance's host name
   and get it without the Authelia check (closing that needs a Traefik allow-list per instance; planned).
-- Network changes (a recreated container, a router restart) are caught by the two-minute watcher, a start, and the router
-  converge; a Docker events listener is planned. After a router restart, instances answer 502 from Caddy until the
-  router's new address reaches the table (immediately for a restart Fleet does, within about two minutes otherwise: see above).
+- Network changes (a recreated container, a router restart) are caught by the Docker events listener (`fleet-isolation-watch`,
+  about a second), a start, the router converge and, as a backstop, the two-minute status watcher. After a router restart,
+  instances answer 502 from Caddy until the router's new address reaches the table (see above).
 - No egress filtering to the Internet, and no isolation inside one instance.
 
 ### Risks and how to roll back
