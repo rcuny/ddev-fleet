@@ -630,12 +630,27 @@ apt_mark_dirty() {
 # call then refuses until `dpkg --configure -a` has run. Checked once per run, before the first apt action.
 DPKG_UPDATES_DIR=/var/lib/dpkg/updates
 DPKG_CHECKED=0
+CLOUD_INIT_CHECKED=0
+
+# FLE-342: a fresh VM runs cloud-init's own apt steps for a while after SSH is up, and `apt-get update` fails at once
+# on /var/lib/apt/lists/lock (DPkg::Lock::Timeout does not cover it). Wait for cloud-init once per run, bounded by
+# FLEET_CLOUD_INIT_WAIT seconds (default 600); a cloud-init error is not ours, so the exit status is ignored.
+cloud_init_wait() {
+  [ "$CLOUD_INIT_CHECKED" = 0 ] || return 0
+  CLOUD_INIT_CHECKED=1
+  command -v cloud-init >/dev/null 2>&1 || return 0
+  local wait=${FLEET_CLOUD_INIT_WAIT:-600}
+  [[ $wait =~ ^[0-9]+$ ]] || wait=600
+  log_info "waiting for cloud-init to finish (at most ${wait}s)"
+  run timeout "$wait" cloud-init status --wait >/dev/null || true
+}
 
 dpkg_interrupted() {
   [ -n "$(dpkg --audit 2>/dev/null || true)" ] || [ -n "$(find "$DPKG_UPDATES_DIR" -maxdepth 1 -type f 2>/dev/null || true)" ]
 }
 
 dpkg_recover() {
+  cloud_init_wait
   [ "$DPKG_CHECKED" = 0 ] || return 0
   DPKG_CHECKED=1
   if is_dry || dpkg_interrupted; then

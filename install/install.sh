@@ -105,6 +105,29 @@ USAGE
     step env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 "$@"
   }
+  # FLE-342: on a fresh VM cloud-init is still running apt for a while after SSH is up, and `apt-get update` fails at once on
+  # /var/lib/apt/lists/lock (DPkg::Lock::Timeout does not cover it). Wait for cloud-init (bounded, FLEET_CLOUD_INIT_WAIT
+  # seconds, default 600; a cloud-init error is not ours), then retry the update. Same logic as lib/common.sh.
+  cloud_init_wait() {
+    command -v cloud-init >/dev/null 2>&1 || return 0
+    local wait=${FLEET_CLOUD_INIT_WAIT:-600}
+    [[ $wait =~ ^[0-9]+$ ]] || wait=600
+    say "[stage 1] waiting for cloud-init to finish (at most ${wait}s)"
+    step timeout "$wait" cloud-init status --wait >/dev/null || true
+  }
+  apt_update_step() {
+    local attempts=${FLEET_APT_ATTEMPTS:-3} delay=${FLEET_APT_RETRY_DELAY:-10} n=1
+    [[ $attempts =~ ^[0-9]+$ ]] && [ "$attempts" -ge 1 ] || attempts=3
+    [[ $delay =~ ^[0-9]+$ ]] || delay=10
+    until apt_step update; do
+      if [ "$n" -ge "$attempts" ]; then
+        return 1
+      fi
+      say "[stage 1] apt-get update failed (attempt $n of $attempts): retrying in ${delay}s" >&2
+      sleep "$delay"
+      n=$((n + 1))
+    done
+  }
   as_fleet() {
     step runuser -u fleet -- env "HOME=$fleet_home" GIT_TERMINAL_PROMPT=0 "$@"
   }
@@ -190,12 +213,13 @@ USAGE
 
   # --- 3. stage 1 work --------------------------------------------------------------------------------------------
   say "[stage 1] bootstrap for $domain (ref $ref)"
+  cloud_init_wait
   # A run killed inside dpkg leaves it half configured; apt refuses to do anything until that is repaired.
   if [ "$dry_run" = 1 ] || [ -n "$(dpkg --audit 2>/dev/null || true)" ] || [ -n "$(find /var/lib/dpkg/updates -maxdepth 1 -type f 2>/dev/null || true)" ]; then
     step env DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
     apt_step -f install
   fi
-  apt_step update
+  apt_update_step
   apt_step install ca-certificates curl git iproute2 bind9-dnsutils
 
   # The checkout belongs to `fleet`; git never runs as root in it (no "dubious ownership" on a re-run).

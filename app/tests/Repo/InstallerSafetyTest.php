@@ -184,6 +184,24 @@ final class InstallerSafetyTest extends TestCase
         self::assertStringContainsString('-o Dpkg::Options::=--force-confold', $common);
     }
 
+    public function testBothStagesWaitForCloudInitAndRetryTheAptUpdate(): void
+    {
+        // FLE-342: apt-get update takes /var/lib/apt/lists/lock, which DPkg::Lock::Timeout does not wait for.
+        $install = (string) file_get_contents(self::installDir().'/install.sh');
+        $common = (string) file_get_contents(self::installDir().'/lib/common.sh');
+
+        foreach ([$install, $common] as $script) {
+            self::assertStringContainsString('cloud-init status --wait', $script);
+            self::assertStringContainsString('FLEET_CLOUD_INIT_WAIT', $script);
+            self::assertStringContainsString('FLEET_APT_ATTEMPTS', $script);
+        }
+        self::assertLessThan(
+            (int) strpos($install, "\n  apt_update_step\n"),
+            (int) strpos($install, "\n  cloud_init_wait\n"),
+            'stage 1 waits for cloud-init before its first apt call',
+        );
+    }
+
     public function testNoDirectDownloadsOutsideTheHelper(): void
     {
         // Downloads go through fetch() (https only, fail on error, retries); wget and ad-hoc pipes are out.
