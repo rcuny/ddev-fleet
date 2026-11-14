@@ -107,23 +107,53 @@ USAGE
   }
   # FLE-342: on a fresh VM cloud-init is still running apt for a while after SSH is up, and `apt-get update` fails at once on
   # /var/lib/apt/lists/lock (DPkg::Lock::Timeout does not cover it). Wait for cloud-init (bounded, FLEET_CLOUD_INIT_WAIT
-  # seconds, default 600; a cloud-init error is not ours), then retry the update. Same logic as lib/common.sh.
+  # seconds, default 600; 0 skips the wait), once per install: FLEET_CLOUD_INIT_WAITED is exported so stage 2 does not wait
+  # again. The wait is skipped when this very run is started by cloud-init (deploy/cloud-init/digitalocean.yaml sets
+  # FLEET_CLOUD_INIT_WAIT=0, and a parent process named cloud-init is detected too): cloud-init would wait for the
+  # installer, which waits for cloud-init. lib/common.sh has the same logic.
+  under_cloud_init() {
+    local pid=$$ comm
+    while [ "$pid" -gt 1 ] 2>/dev/null; do
+      comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+      case $comm in cloud-init*) return 0 ;; esac
+      pid=$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 1)
+      [ -n "$pid" ] || return 1
+    done
+    return 1
+  }
   cloud_init_wait() {
+    [ "${FLEET_CLOUD_INIT_WAITED:-0}" = 1 ] && return 0
+    export FLEET_CLOUD_INIT_WAITED=1
     command -v cloud-init >/dev/null 2>&1 || return 0
     local wait=${FLEET_CLOUD_INIT_WAIT:-600}
     [[ $wait =~ ^[0-9]+$ ]] || wait=600
+    [ "$((10#$wait))" -gt 0 ] || return 0
+    if under_cloud_init; then
+      say "[stage 1] started by cloud-init: not waiting for it"
+      return 0
+    fi
     say "[stage 1] waiting for cloud-init to finish (at most ${wait}s)"
     step timeout "$wait" cloud-init status --wait >/dev/null || true
   }
+  # Retries only when apt-get update failed on a lock (a real error such as a bad mirror fails at once).
   apt_update_step() {
-    local attempts=${FLEET_APT_ATTEMPTS:-3} delay=${FLEET_APT_RETRY_DELAY:-10} n=1
+    local attempts=${FLEET_APT_ATTEMPTS:-3} delay=${FLEET_APT_RETRY_DELAY:-10} n=1 out rc
     [[ $attempts =~ ^[0-9]+$ ]] && [ "$attempts" -ge 1 ] || attempts=3
     [[ $delay =~ ^[0-9]+$ ]] || delay=10
-    until apt_step update; do
-      if [ "$n" -ge "$attempts" ]; then
-        return 1
+    out=$(mktemp)
+    while :; do
+      rc=0
+      apt_step update >"$out" 2>&1 || rc=$?
+      cat "$out"
+      if [ "$rc" -eq 0 ]; then
+        rm -f "$out"
+        return 0
       fi
-      say "[stage 1] apt-get update failed (attempt $n of $attempts): retrying in ${delay}s" >&2
+      if [ "$n" -ge "$attempts" ] || ! grep -qiE 'Could not get lock|Unable to acquire the|is held by process' "$out"; then
+        rm -f "$out"
+        return "$rc"
+      fi
+      say "[stage 1] apt-get update failed on a lock (attempt $n of $attempts): retrying in ${delay}s" >&2
       sleep "$delay"
       n=$((n + 1))
     done

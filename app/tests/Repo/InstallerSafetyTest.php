@@ -200,6 +200,15 @@ final class InstallerSafetyTest extends TestCase
             (int) strpos($install, "\n  cloud_init_wait\n"),
             'stage 1 waits for cloud-init before its first apt call',
         );
+        // The wait happens once per install, 0 skips it, and a run started by cloud-init never waits for itself.
+        foreach ([$install, $common] as $script) {
+            self::assertStringContainsString('FLEET_CLOUD_INIT_WAITED', $script);
+            self::assertStringContainsString('under_cloud_init', $script);
+            self::assertStringContainsString('-gt 0', $script, '0 skips the wait');
+        }
+        self::assertStringContainsString('Could not get lock', $install, 'stage 1 retries on lock errors only');
+        $yaml = (string) file_get_contents(\dirname(self::installDir()).'/deploy/cloud-init/digitalocean.yaml');
+        self::assertStringContainsString('export FLEET_CLOUD_INIT_WAIT=0', $yaml, 'the first-boot script runs inside cloud-init');
     }
 
     public function testNoDirectDownloadsOutsideTheHelper(): void

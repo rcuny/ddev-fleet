@@ -633,14 +633,34 @@ DPKG_CHECKED=0
 CLOUD_INIT_CHECKED=0
 
 # FLE-342: a fresh VM runs cloud-init's own apt steps for a while after SSH is up, and `apt-get update` fails at once
-# on /var/lib/apt/lists/lock (DPkg::Lock::Timeout does not cover it). Wait for cloud-init once per run, bounded by
-# FLEET_CLOUD_INIT_WAIT seconds (default 600); a cloud-init error is not ours, so the exit status is ignored.
+# on /var/lib/apt/lists/lock (DPkg::Lock::Timeout does not cover it). Wait for cloud-init once per install (stage 1 exports
+# FLEET_CLOUD_INIT_WAITED), bounded by FLEET_CLOUD_INIT_WAIT seconds (default 600; 0 skips). It is skipped when the
+# installer runs under cloud-init itself (the DigitalOcean first-boot script sets FLEET_CLOUD_INIT_WAIT=0; a parent named
+# cloud-init is detected too), which would wait for itself. A cloud-init error is not ours, so its status is ignored.
+under_cloud_init() {
+  local pid=$$ comm
+  while [ "$pid" -gt 1 ] 2>/dev/null; do
+    comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+    case $comm in cloud-init*) return 0 ;; esac
+    pid=$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 1)
+    [ -n "$pid" ] || return 1
+  done
+  return 1
+}
+
 cloud_init_wait() {
   [ "$CLOUD_INIT_CHECKED" = 0 ] || return 0
   CLOUD_INIT_CHECKED=1
+  [ "${FLEET_CLOUD_INIT_WAITED:-0}" != 1 ] || return 0
+  export FLEET_CLOUD_INIT_WAITED=1
   command -v cloud-init >/dev/null 2>&1 || return 0
   local wait=${FLEET_CLOUD_INIT_WAIT:-600}
   [[ $wait =~ ^[0-9]+$ ]] || wait=600
+  [ "$((10#$wait))" -gt 0 ] || return 0
+  if under_cloud_init; then
+    log_info "started by cloud-init: not waiting for it"
+    return 0
+  fi
   log_info "waiting for cloud-init to finish (at most ${wait}s)"
   run timeout "$wait" cloud-init status --wait >/dev/null || true
 }

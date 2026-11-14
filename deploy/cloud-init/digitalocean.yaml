@@ -24,6 +24,9 @@ write_files:
       # --------------------------------------------------------------------------------------------------------------
       set -Eeuo pipefail
       export DEBIAN_FRONTEND=noninteractive
+      # This script runs inside cloud-init's final stage, so the installer must not wait for cloud-init (it would wait for
+      # itself): 0 skips the wait (FLE-342).
+      export FLEET_CLOUD_INIT_WAIT=0
       REPO=https://github.com/rcuny/ddev-fleet.git
       READY=/root/FLEET-READY.txt
 
