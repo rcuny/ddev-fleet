@@ -280,6 +280,27 @@ final class HostIsolationCommandTest extends KernelTestCase
         self::assertSame(['link cms--staging/web'], array_column($failed, 'to'));
     }
 
+    public function testEnforceModeStillFailsOnABlockedLiveLink(): void
+    {
+        $this->cli('fleet:project:link:create', ['source' => 'app', 'target' => 'cms', '--service' => 'web', '--port' => '80', '--format' => 'json']);
+        $this->docker();
+        $this->runner()->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, '{"nftables":[]}'));
+        $go = $this->cli('fleet:host:isolation:enable', ['--mode' => 'enforce', '--yes' => true]);
+        self::assertSame(0, $go->getStatusCode(), $go->getDisplay());
+        $this->runner()->expect(['docker', 'network', 'inspect', '--format', '{{range .IPAM.Config}}{{.Gateway}} {{end}}'], new CommandResult(0, "172.18.0.1 \n"));
+        foreach (['app--staging', 'cms--staging'] as $id) {
+            $this->runner()->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-web|web|com.ddev.site-name='.$id."\n"));
+        }
+        $this->runner()->expect(['docker', 'exec', 'ddev-app--staging-web', 'timeout', '3', 'bash', '-c', 'exec 3<>/dev/tcp/$0/$1', 'web.cms', '80'], new CommandResult(1));
+
+        $enforced = $this->cli('fleet:host:isolation:check', ['--json' => true]);
+
+        self::assertSame(1, $enforced->getStatusCode());
+        $link = array_values(array_filter((array) $this->json($enforced)['probes'], static fn (array $p): bool => 'link cms--staging/web' === $p['to']));
+        self::assertSame('reachable', $link[0]['expected']);
+        self::assertFalse($link[0]['ok']);
+    }
+
     public function testBridgeNetfilterMissingFailsTheCheckAndRefusesEnable(): void
     {
         unlink($this->tempHome.'/test-bridge-nf/bridge-nf-call-iptables');

@@ -109,7 +109,8 @@ address), plus every live link, and checks that `br_netfilter` is active. Databa
 the project's own network and are never reachable from another project in any mode. It asserts only what the mode promises:
 `enforce` expects the web containers, the router API and ssh blocked, and the Internet and the link targets reachable; `off` and
 `report` promise no reachability (a host firewall may block ssh), so those probes are listed as `any` and never fail, while the
-The Internet must be reachable in every mode; live links in report and enforce (in off mode the link network does not exist yet, so the link probe only reports). Exit 0 = every probe behaved as expected, 1 = not,
+Internet must be reachable in every mode and live links in `report` and `enforce` (in `off` mode the link network does not exist yet, so the
+link probe only reports). Exit 0 = every probe behaved as expected, 1 = not,
 3 = Docker did not answer.
 
 ### `br_netfilter` is required
