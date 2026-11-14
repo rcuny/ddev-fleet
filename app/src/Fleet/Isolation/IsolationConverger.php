@@ -43,6 +43,8 @@ final class IsolationConverger
         private readonly NftablesServiceGuard $nftables,
         private readonly BridgeNetfilterGuard $bridgeNf,
         private readonly ?RouterAccess $routerAccess = null,
+        private readonly ?\App\Fleet\PortMirror\RouterCopies $routerCopies = null,
+        private readonly ?\App\Fleet\PortMirror\PortMirror $mirror = null,
     ) {
     }
 
@@ -98,6 +100,8 @@ final class IsolationConverger
         if (IsolationMode::Enforce !== $mode) {
             // Off and report never leave a router allow-list behind (FLE-326), whatever else this pass finds.
             $this->routerAccess?->sync($mode, []);
+            // FLE-336: the :443 mirror stops sending PROXY (and the static trust is no longer written) outside enforce mode.
+            $this->routerMirror($mode, $log);
         }
         if (IsolationMode::Off === $mode) {
             // A table left behind (a disable that failed half way) is removed here: the next pass retries it.
@@ -121,6 +125,7 @@ final class IsolationConverger
         if (null !== $problem = $this->routerAccess?->sync($mode, array_values(array_filter($links, static fn (ResolvedLink $l): bool => $l->isLive())))) {
             $log('isolation: '.$problem);
         }
+        $this->routerMirror($mode, $log);
         $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
         if (null === $bridge) {
             return new IsolationPass($mode, $links, applied: false);
@@ -351,5 +356,34 @@ final class IsolationConverger
     private function recordHash(string $hash): void
     {
         AtomicFile::write($this->hashFile(), $hash."\n", 0o640);
+    }
+
+    /**
+     * FLE-326/336: keeps the port mirror's files and the router's copies of them in line with the mode. In `enforce` the mirror sends
+     * PROXY only once the router's live configuration trusts it; in `off` and `report` it never does. The dynamic file goes live by
+     * itself, the static one needs `fleet port:refresh` (a pass never restarts the router).
+     *
+     * @param callable(string): void $log
+     */
+    private function routerMirror(IsolationMode $mode, callable $log): void
+    {
+        if (null === $this->routerCopies) {
+            return;
+        }
+        try {
+            $this->mirror?->sync();
+        } catch (\RuntimeException $e) {
+            $log('isolation: the port mirror files could not be written: '.$e->getMessage());
+        }
+        $repair = $this->routerCopies->repair();
+        foreach ($repair['pushed'] as $what) {
+            $log('isolation: pushed '.$what.' into ddev-router');
+        }
+        foreach ($repair['problems'] as $problem) {
+            $log('isolation: '.$problem);
+        }
+        if ($repair['restartNeeded'] && IsolationMode::Enforce === $mode) {
+            $log('isolation: ddev-router has not restarted since its static configuration changed (the PROXY trust of the :443 mirror is not live, isolation is NOT enforced on :443): run "fleet port:refresh"');
+        }
     }
 }
