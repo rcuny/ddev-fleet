@@ -276,6 +276,31 @@ final class PortCommandsTest extends KernelTestCase
         self::assertSame([], array_values(array_filter($this->recorded(), static fn (array $argv): bool => 'inspect' !== ($argv[1] ?? ''))), 'port:refresh never restarts the router');
     }
 
+    /** FLE-343: in enforce mode a refresh that pushed something runs a follow-up isolation pass; its failure is printed and fails the command. */
+    public function testRefreshPrintsAFailedFollowUpIsolationPass(): void
+    {
+        $traefik = $this->traefik();
+        $this->cli('fleet:host:init', ['--domain' => 'fleet.example.com']);
+        $repo = self::getContainer()->get(\App\Domain\Host\HostSettingsRepository::class);
+        $settings = $repo->get();
+        self::assertNotNull($settings);
+        $settings->changeIsolationMode(\App\Domain\Host\IsolationMode::Enforce, new \DateTimeImmutable());
+        $repo->save($settings);
+        $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108']);
+        $this->cli('fleet:port:refresh');
+        $runner = self::getContainer()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        // The router runs with an old copy of the dynamic file: refresh pushes it, then the follow-up pass finds nftables.service enabled.
+        $runner->expect(['docker', 'inspect', '--format', '{{.State.Running}}'], new \App\Fleet\Shell\CommandResult(0, "true\n"));
+        $runner->expect(['docker', 'exec', 'ddev-router', 'cat'], new \App\Fleet\Shell\CommandResult(0, 'old dynamic'));
+        $runner->expect(['systemctl', 'is-enabled', 'nftables.service'], new \App\Fleet\Shell\CommandResult(0, "enabled\n"));
+
+        $refresh = $this->cli('fleet:port:refresh');
+
+        self::assertStringContainsString('the follow-up isolation pass failed (', $refresh->getErrorOutput().$refresh->getDisplay());
+        self::assertSame(2, $refresh->getStatusCode(), $refresh->getDisplay());
+    }
+
     /**
      * @return list<list<string>>
      */

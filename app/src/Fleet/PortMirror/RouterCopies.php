@@ -167,11 +167,22 @@ final readonly class RouterCopies
         if ('' === trim($text)) {
             return false;
         }
+        // Never replace an existing backup unless the router is verified healthy right now: after a failed rollback the current
+        // file may be a bad merged one, and it must not become "the original". The backup is then kept (and `$text` ignored).
+        if (is_file($this->backupFile()) && $this->exec(['test', '-s', $path.'.fleet-backup']) && !$this->routerHealthy()) {
+            return true;
+        }
         if (false === @file_put_contents($this->backupFile(), $text)) {
             return false;
         }
 
         return $this->exec(['cp', '-f', $path, $path.'.fleet-backup']);
+    }
+
+    /** The Traefik API answers and knows its entry points: the router runs the configuration it was given. */
+    private function routerHealthy(): bool
+    {
+        return null !== $this->live->names();
     }
 
     /**
@@ -321,7 +332,7 @@ final readonly class RouterCopies
         return $this->run(['docker', 'exec', self::ROUTER, 'cat', $path]);
     }
 
-    /** Copies a host file into the router: under a temporary name, then renamed (or, for a file Traefik is started with, written over). */
+    /** Copies a host file into the router: under a temporary name in the same directory, then renamed over the target (atomic). */
     private function put(string $hostFile, string $path, bool $overwrite): bool
     {
         $tmp = $path.'.fleet-tmp';
@@ -329,9 +340,13 @@ final readonly class RouterCopies
             return false;
         }
 
-        return $overwrite
-            ? $this->exec(['sh', '-c', 'cat "$0" > "$1" && rm -f "$0"', $tmp, $path])
-            : $this->exec(['mv', '-f', $tmp, $path]);
+        // Same directory, so the rename is atomic: a reader (or a crash) sees the old file or the whole new one, never half of it.
+        // `cat >` over the file is only the fallback for a path that cannot be replaced by a rename (a bind-mounted file).
+        if ($this->exec(['mv', '-f', $tmp, $path])) {
+            return true;
+        }
+
+        return $overwrite && $this->exec(['sh', '-c', 'cat "$0" > "$1" && rm -f "$0"', $tmp, $path]);
     }
 
     /** @param list<string> $argv */

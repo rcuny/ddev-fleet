@@ -72,11 +72,10 @@ final class RouterCopiesTest extends PortMirrorTestCase
         self::assertSame(['the port mirror dynamic file', 'the port mirror static configuration'], $repair['pushed']);
         self::assertTrue($repair['restartNeeded']);
         self::assertCount(1, $this->runner->callsMatching(['docker', 'cp', $this->traefik->dynamicFile()]));
-        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f']));
-        // The static copy is the router's own file with the fragment merged in (the router's other keys stay).
-        $static = $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']);
-        self::assertCount(1, $static);
-        self::assertContains(self::STATIC_PATH, $static[0]->argv);
+        // Both files are renamed into place (the dynamic one and the router's static file with the fragment merged in; its other keys stay).
+        self::assertCount(2, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f']));
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f', self::STATIC_PATH.'.fleet-tmp', self::STATIC_PATH]));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']));
     }
 
     public function testNothingIsPushedOrRestartedWhenTheRouterAlreadyHoldsTheFilesAndTrustsTheProxy(): void
@@ -182,7 +181,63 @@ final class RouterCopiesTest extends PortMirrorTestCase
         self::assertFileDoesNotExist($this->copies->backupFile());
     }
 
-    public function testTheOriginalIsBackedUpBeforeTheStaticPushAndCanBeRestored(): void
+    public function testTheStaticFileIsReplacedByARenameInTheSameDirectoryNeverWrittenInPlace(): void
+    {
+        $this->router($this->hostDynamic(), $this->oldStatic());
+        $this->live->proxyTrusted = false;
+
+        $this->copies->repair();
+
+        $cp = $this->runner->callsMatching(['docker', 'cp']);
+        $tmpCopies = array_filter($cp, static fn ($c): bool => str_ends_with($c->argv[\count($c->argv) - 1], self::STATIC_PATH.'.fleet-tmp'));
+        self::assertNotSame([], $tmpCopies, 'the new file is copied to a temp name next to the target');
+        $mv = $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f', self::STATIC_PATH.'.fleet-tmp', self::STATIC_PATH]);
+        self::assertCount(1, $mv, 'and renamed over it (atomic)');
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c', 'cat "$0" > "$1" && rm -f "$0"', self::STATIC_PATH.'.fleet-tmp']), 'no in-place write while the rename works');
+    }
+
+    public function testAnExistingBackupIsKeptWhileTheRouterIsNotVerifiedHealthy(): void
+    {
+        // A failed rollback left a bad merged file in the router; the next fragment change must not make it "the original".
+        file_put_contents($this->copies->backupFile(), "ORIGINAL\n");
+        $this->router($this->hostDynamic(), $this->oldStatic());
+        $this->live->proxyTrusted = false;
+        $this->live->script(null);
+
+        $this->copies->repair();
+
+        self::assertSame("ORIGINAL\n", (string) file_get_contents($this->copies->backupFile()));
+    }
+
+    public function testAnExistingBackupIsReplacedWhenTheRouterIsHealthy(): void
+    {
+        file_put_contents($this->copies->backupFile(), "STALE\n");
+        $this->router($this->hostDynamic(), $this->oldStatic());
+        $this->live->proxyTrusted = false;
+        $this->live->script(['http-8443']);
+
+        $this->copies->repair();
+
+        self::assertSame($this->oldStatic(), (string) file_get_contents($this->copies->backupFile()));
+    }
+
+    public function testRestoreWritesTheSavedOriginalBackIntoTheRouter(): void
+    {
+        $this->router($this->hostDynamic(), $this->oldStatic());
+        $this->live->proxyTrusted = false;
+        $this->copies->repair();
+        $before = \count($this->runner->calls());
+
+        self::assertTrue($this->copies->restoreStatic());
+
+        $after = \array_slice($this->runner->calls(), $before);
+        $argvs = array_map(static fn ($c): string => implode(' ', $c->argv), $after);
+        self::assertContains('docker cp '.$this->copies->backupFile().' ddev-router:'.self::STATIC_PATH.'.fleet-tmp', $argvs, 'the host backup is what goes back');
+        self::assertContains('docker exec ddev-router mv -f '.self::STATIC_PATH.'.fleet-tmp '.self::STATIC_PATH, $argvs);
+        self::assertSame($this->oldStatic(), (string) file_get_contents($this->copies->backupFile()));
+    }
+
+    public function testTheOriginalIsBackedUpBeforeTheStaticPush(): void
     {
         $this->router($this->hostDynamic(), $this->oldStatic());
         $this->live->proxyTrusted = false;
@@ -191,11 +246,6 @@ final class RouterCopiesTest extends PortMirrorTestCase
 
         self::assertSame(['the port mirror static configuration'], $repair['pushed']);
         self::assertSame($this->oldStatic(), (string) file_get_contents($this->copies->backupFile()));
-        $calls = array_map(static fn ($c): string => implode(' ', \array_slice($c->argv, 0, 5)), $this->runner->calls());
-        $backup = array_search('docker exec ddev-router cp -f', array_map(static fn (string $c): string => $c, $calls), true);
-        self::assertNotFalse($backup);
-
-        $this->runner->expect(['docker', 'exec', 'ddev-router', 'cat', self::STATIC_PATH], new CommandResult(0, 'merged'));
-        self::assertTrue($this->copies->restoreStatic());
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'cp', '-f', self::STATIC_PATH, self::STATIC_PATH.'.fleet-backup']));
     }
 }

@@ -301,6 +301,22 @@ final class HostIsolationCommandTest extends KernelTestCase
         self::assertFalse($link[0]['ok']);
     }
 
+    /** FLE-343: enforce runs a follow-up pass after the router refresh, and a failure of it is printed, not swallowed. */
+    public function testEnforceRunsAFollowUpPassAndPrintsItsFailure(): void
+    {
+        $this->docker();
+        $this->runner()->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, '{"nftables":[]}'));
+        // The enable's own pass and the router refresh see no nftables service; the follow-up pass sees one.
+        $this->runner()->expect(['systemctl', 'is-enabled', 'nftables.service'], new CommandResult(1, ''));
+        $this->runner()->expect(['systemctl', 'is-enabled', 'nftables.service'], new CommandResult(1, ''));
+        $this->runner()->expect(['systemctl', 'is-enabled', 'nftables.service'], new CommandResult(0, "enabled\n"));
+
+        $go = $this->cli('fleet:host:isolation:enable', ['--mode' => 'enforce', '--yes' => true]);
+
+        self::assertStringContainsString('the follow-up pass failed (', $go->getDisplay(), $go->getDisplay());
+        self::assertStringContainsString('nftables.service is enabled', $go->getDisplay());
+    }
+
     public function testBridgeNetfilterMissingFailsTheCheckAndRefusesEnable(): void
     {
         unlink($this->tempHome.'/test-bridge-nf/bridge-nf-call-iptables');
