@@ -23,6 +23,7 @@ final class PortRefreshCommand extends Command
         private readonly InstanceSiteRefresher $sites,
         private readonly PortMirror $mirror,
         private readonly \App\Fleet\PortMirror\RouterRefresh $router,
+        private readonly ?\App\Fleet\Isolation\IsolationConverger $isolation = null,
     ) {
         parent::__construct();
     }
@@ -38,7 +39,7 @@ final class PortRefreshCommand extends Command
         $out = JsonOutput::of($input, $output, FieldErrors::project());
         $failed = false;
 
-        $code = $out->run(function () use ($input, $out, &$failed): void {
+        $code = $out->run(function () use ($input, $output, $out, &$failed): void {
             $name = $input->getOption('project');
             $result = $this->sites->refresh(\is_string($name) && '' !== $name ? $this->projects->get($name) : null);
             $failed = [] !== $result->failed;
@@ -62,7 +63,18 @@ final class PortRefreshCommand extends Command
             // FLE-326: the router reads its own copies of the mirror files; push them and restart it once if the static part changed.
             $router = ['lines' => [], 'restarted' => false, 'problems' => []];
             if (null === $mirrorError) {
-                $router = $this->router->run();
+                // Progress goes to stderr (the document on stdout stays machine-readable): the waits are bounded but not instant.
+                $err = $output instanceof \Symfony\Component\Console\Output\ConsoleOutputInterface ? $output->getErrorOutput() : null;
+                $router = $this->router->run(null === $err ? null : static function (string $line) use ($err): void {
+                    $err->writeln($line);
+                });
+                if ([] !== $router['lines'] || $router['restarted']) {
+                    try {
+                        $this->isolation?->pass(null, true);
+                    } catch (\Throwable) {
+                        // the watcher's next pass retries
+                    }
+                }
                 $failed = $failed || [] !== $router['problems'];
                 if ($router['restarted']) {
                     $mirror['state'] = $this->mirror->isLive() ? 'live' : 'pending';

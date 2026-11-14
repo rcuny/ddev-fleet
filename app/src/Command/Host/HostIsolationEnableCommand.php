@@ -71,9 +71,14 @@ final class HostIsolationEnableCommand extends Command
         $output->writeln('Isolation mode: '.$mode->value.($pass->applied ? ' (ruleset installed)' : ''));
         if (IsolationMode::Enforce === $mode && null !== $this->router) {
             // FLE-326: the router's own copies must hold the current mirror files (the PROXY trust of the :443 mirror) before enforce is real.
-            $router = $this->router->run();
-            foreach ($router['lines'] as $line) {
+            $router = $this->router->run(static function (string $line) use ($output): void {
                 $output->writeln($line);
+            });
+            // The mirror may carry PROXY now: the pass renders the router allow-list again with the :443 rules that depend on it.
+            try {
+                $this->converger->pass(null, true);
+            } catch (\Throwable $e) {
+                $output->writeln('<comment>isolation: the follow-up pass failed ('.$e->getMessage().'), the watcher retries</comment>');
             }
             foreach ($router['problems'] as $problem) {
                 $output->writeln('<error>router: '.$problem.'</error>');

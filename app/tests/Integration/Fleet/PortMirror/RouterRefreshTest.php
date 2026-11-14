@@ -122,6 +122,33 @@ final class RouterRefreshTest extends PortMirrorTestCase
         self::assertStringNotContainsString('proxyProtocol', $this->dynamic());
     }
 
+    /** FLE-336: no wait loop may run for minutes; an API that never answers costs at most the budget per wait, and progress is reported. */
+    public function testWaitsAreBoundedAndProgressIsReported(): void
+    {
+        $slept = 0.0;
+        $refresh = new RouterRefresh(new RouterCopies($this->runner, $this->traefik, $this->live), $this->converger, $this->mirror, $this->live, static function (float $s) use (&$slept): void {
+            $slept += $s;
+        });
+        $this->live->proxyTrusted = false;
+        $this->live->script(null); // the API never answers, so the verify fails and the rollback's verify fails too
+        $this->ddev125Router(self::OLD_STATIC);
+        $this->runner->expect(['docker', 'inspect', '-f'], new CommandResult(0, "healthy\n"));
+        $this->runner->expect(['docker', 'inspect', '-f'], new CommandResult(0, "healthy\n"));
+        $progress = [];
+
+        $result = $refresh->run(static function (string $line) use (&$progress): void {
+            $progress[] = $line;
+        });
+
+        self::assertLessThanOrEqual(2 * RouterRefresh::WAIT_BUDGET, $slept, 'two waits (the restart, then the rollback) at most');
+        self::assertSame($result['lines'], $progress, 'every line was reported as it happened');
+        self::assertNotSame([], array_filter($progress, static fn (string $l): bool => str_contains($l, 'waiting up to')));
+        foreach ($this->runner->callsMatching(['docker', 'restart', 'ddev-router']) as $call) {
+            self::assertLessThanOrEqual(45.0, $call->timeout, 'a restart is bounded');
+        }
+        self::assertNotSame([], $result['problems']);
+    }
+
     public function testTheProbeHasNothingToCheckWithoutARunningInstance(): void
     {
         $probe = new \App\Fleet\PortMirror\RouterProbe(new \App\Domain\Instance\InstanceRepository($this->em), new \App\Fleet\Instances\InstanceHostnames($this->hostSettings), $this->runner);

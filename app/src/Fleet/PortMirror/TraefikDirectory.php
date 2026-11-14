@@ -71,4 +71,25 @@ final readonly class TraefikDirectory
     {
         return $this->home.'/.ddev/'.self::GLOBAL_CONFIG_FILENAME;
     }
+
+    /**
+     * DDEV's names for the router's plain-http and https entry points (`http-<router_http_port>`, `http-<router_https_port>`) from its
+     * global configuration, defaults 80 and 443. Used when the Traefik API cannot be asked (FLE-336): never a `fleet-mirror-*` name.
+     *
+     * @return list<string>
+     */
+    public function routerHttpEntryPoints(): array
+    {
+        $ports = ['router_http_port' => 80, 'router_https_port' => 443];
+        $text = @file_get_contents($this->globalConfigFile());
+        $data = \is_string($text) ? @\Symfony\Component\Yaml\Yaml::parse($text) : null;
+        foreach ($ports as $key => $default) {
+            $value = \is_array($data) ? ($data[$key] ?? null) : null;
+            if (\is_int($value) || (\is_string($value) && ctype_digit($value))) {
+                $ports[$key] = (int) $value;
+            }
+        }
+
+        return array_values(array_unique(array_map(static fn (int $port): string => 'http-'.$port, array_values($ports))));
+    }
 }

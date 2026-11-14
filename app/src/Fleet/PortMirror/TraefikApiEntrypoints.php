@@ -22,7 +22,7 @@ final readonly class TraefikApiEntrypoints implements LiveEntrypoints
     public function names(): ?array
     {
         try {
-            $data = $this->client->request('GET', self::URL, ['timeout' => self::TIMEOUT, 'max_duration' => self::TIMEOUT * 2])->toArray();
+            $data = $this->client->request('GET', self::URL, ['timeout' => self::TIMEOUT, 'max_duration' => self::TIMEOUT + 1])->toArray();
         } catch (ExceptionInterface) {
             return null;
         }
@@ -43,7 +43,7 @@ final readonly class TraefikApiEntrypoints implements LiveEntrypoints
     public function proxyTrusted(string $name): ?bool
     {
         try {
-            $data = $this->client->request('GET', self::URL, ['timeout' => self::TIMEOUT, 'max_duration' => self::TIMEOUT * 2])->toArray();
+            $data = $this->client->request('GET', self::URL, ['timeout' => self::TIMEOUT, 'max_duration' => self::TIMEOUT + 1])->toArray();
         } catch (ExceptionInterface) {
             return null;
         }

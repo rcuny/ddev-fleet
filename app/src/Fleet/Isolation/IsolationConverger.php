@@ -122,10 +122,10 @@ final class IsolationConverger
             return new IsolationPass($mode, error: $problem);
         }
         $links = $this->reconcileLinks($log);
+        $this->routerMirror($mode, $log);
         if (null !== $problem = $this->routerAccess?->sync($mode, array_values(array_filter($links, static fn (ResolvedLink $l): bool => $l->isLive())))) {
             $log('isolation: '.$problem);
         }
-        $this->routerMirror($mode, $log);
         $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
         if (null === $bridge) {
             return new IsolationPass($mode, $links, applied: false);
@@ -187,6 +187,13 @@ final class IsolationConverger
                 $settings->changeIsolationMode($mode, new \DateTimeImmutable());
                 $this->host->save($settings);
                 $this->audit->record($actor, AuditLog::ISOLATION_MODE, $before->value.' -> '.$mode->value);
+            } catch (\Throwable $e) {
+                $error ??= $e;
+            }
+            try {
+                // FLE-336: the :443 mirror stops sending PROXY now, not at the next watcher pass (the mode is saved, so the plan says no).
+                $this->routerMirror($mode, static function (string $line): void {
+                });
             } catch (\Throwable $e) {
                 $error ??= $e;
             }

@@ -55,7 +55,8 @@ final readonly class PortMirror
     /** FLE-336: the router's static configuration and PROXY header are touched in this mode only. */
     public function isolationEnforced(): bool
     {
-        return IsolationMode::Enforce === $this->settings->get()?->isolationMode();
+        // fresh(): the isolation watcher is one long process; its identity map would keep the mode it first read.
+        return IsolationMode::Enforce === $this->settings->fresh()?->isolationMode();
     }
 
     public function enabled(): bool

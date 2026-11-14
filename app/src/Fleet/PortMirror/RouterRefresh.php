@@ -17,7 +17,9 @@ namespace App\Fleet\PortMirror;
  */
 final readonly class RouterRefresh
 {
-    private const int TRUST_WAIT_ATTEMPTS = 15;
+    /** Seconds each wait loop may take (the API after a restart, the PROXY trust), and for the whole rollback: nothing here may run for minutes (FLE-336). */
+    public const float WAIT_BUDGET = 45.0;
+    private const float POLL_SECONDS = 2.0;
 
     public function __construct(
         private RouterCopies $copies,
@@ -30,11 +32,33 @@ final readonly class RouterRefresh
     }
 
     /**
+     * @param (\Closure(string): void)|null $say progress: every line is passed here as it happens (the result lists them too)
+     *
      * @return array{lines: list<string>, restarted: bool, problems: list<string>}
      */
-    public function run(): array
+    public function run(?\Closure $say = null): array
     {
+        $say ??= static function (string $line): void {
+        };
+        /** @var list<string> $lines */
         $lines = [];
+        $note = static function (string $line) use (&$lines, $say): void {
+            $lines[] = $line;
+            $say($line);
+        };
+        $result = $this->runSteps($note);
+        $result['lines'] = $lines;
+
+        return $result;
+    }
+
+    /**
+     * @param \Closure(string): void $note
+     *
+     * @return array{lines: list<string>, restarted: bool, problems: list<string>}
+     */
+    private function runSteps(\Closure $note): array
+    {
         $problems = [];
         $restarted = false;
         try {
@@ -46,28 +70,29 @@ final readonly class RouterRefresh
         // Outside enforce mode the router's static configuration is never pushed and the router never restarted: a difference is only reported.
         $repair = $this->copies->repair($enforce);
         foreach ($repair['pushed'] as $what) {
-            $lines[] = 'router: pushed '.$what;
+            $note('router: pushed '.$what);
         }
         $problems = [...$problems, ...$repair['problems']];
         if (!$enforce) {
             if ($repair['staticDiffers']) {
-                $lines[] = 'router: its static configuration differs from the port mirror fragment; not applied, isolation is not in enforce mode';
+                $note('router: its static configuration differs from the port mirror fragment; not applied, isolation is not in enforce mode');
             }
 
-            return ['lines' => $lines, 'restarted' => false, 'problems' => $problems];
+            return ['lines' => [], 'restarted' => false, 'problems' => $problems];
         }
 
         if ($repair['restartNeeded']) {
-            $lines[] = 'router: the static configuration changed, restarting ddev-router once (every instance blinks for a few seconds)';
-            $why = $this->router->restartForConfig() ?? $this->verifyRouter();
+            $note('router: the static configuration changed, restarting ddev-router once (every instance blinks for a few seconds; at most about 2 minutes)');
+            $why = $this->router->restartForConfig() ?? $this->verifyRouter($note);
             if (null === $why) {
                 $restarted = true;
-                $lines[] = 'router: ddev-router restarted and healthy';
+                $note('router: ddev-router restarted and healthy');
             } else {
-                $problems[] = 'the router is not healthy after the restart ('.$why.'): '.$this->rollback();
+                $note('router: NOT healthy after the restart ('.$why.'), restoring the original static configuration');
+                $problems[] = 'the router is not healthy after the restart ('.$why.'): '.$this->rollback($note);
                 $this->settleMirrorWithoutProxy();
 
-                return ['lines' => $lines, 'restarted' => true, 'problems' => $problems];
+                return ['lines' => [], 'restarted' => true, 'problems' => $problems];
             }
         }
 
@@ -75,13 +100,14 @@ final readonly class RouterRefresh
         $site = $plan->siteTarget;
         if (null === $site || !$plan->trust) {
             // No :443 mirror: no PROXY trust is wanted, nothing more to wait for.
-            return ['lines' => $lines, 'restarted' => $restarted, 'problems' => $problems];
+            return ['lines' => [], 'restarted' => $restarted, 'problems' => $problems];
         }
         $name = MirrorPlan::siteTargetEntrypoint($site);
+        $note(\sprintf('router: waiting up to %d s for the router to trust a PROXY header on %s', (int) self::WAIT_BUDGET, $name));
         if (!$this->waitForTrust($name)) {
-            $problems[] = 'the router does not trust a PROXY header on '.$name.' yet: the :443 mirror stays without PROXY (it works, but instance isolation is NOT enforced on :443) until "fleet port:refresh" succeeds';
+            $problems[] = 'the router does not trust a PROXY header on '.$name.' within '.(int) self::WAIT_BUDGET.' s: the :443 mirror stays without PROXY (it works as in off mode, but instance isolation is NOT enforced on :443) until "fleet port:refresh" succeeds';
 
-            return ['lines' => $lines, 'restarted' => $restarted, 'problems' => $problems];
+            return ['lines' => [], 'restarted' => $restarted, 'problems' => $problems];
         }
 
         // The router trusts it now: write the mirror files with the PROXY header and push them.
@@ -89,7 +115,7 @@ final readonly class RouterRefresh
             if ($this->mirror->sync()->changed) {
                 $again = $this->copies->repair();
                 foreach ($again['pushed'] as $what) {
-                    $lines[] = 'router: pushed '.$what.' (the :443 mirror now sends PROXY)';
+                    $note('router: pushed '.$what.' (the :443 mirror now sends PROXY)');
                 }
                 $problems = [...$problems, ...$again['problems']];
             }
@@ -97,33 +123,36 @@ final readonly class RouterRefresh
             $problems[] = 'the mirror files could not be written: '.$e->getMessage();
         }
 
-        return ['lines' => $lines, 'restarted' => $restarted, 'problems' => $problems];
+        return ['lines' => [], 'restarted' => $restarted, 'problems' => $problems];
     }
 
-    /** Container healthy is checked by the restart itself; here: the Traefik API answers and a real request is routed. */
-    private function verifyRouter(): ?string
+    /**
+     * Container healthy is checked by the restart itself; here: the Traefik API answers (bounded wait) and a real request is routed.
+     *
+     * @param \Closure(string): void $note
+     */
+    private function verifyRouter(\Closure $note): ?string
     {
-        $answered = false;
-        for ($attempt = 0; $attempt < self::TRUST_WAIT_ATTEMPTS && !$answered; ++$attempt) {
-            $answered = null !== $this->live->names();
-            if (!$answered && $attempt < self::TRUST_WAIT_ATTEMPTS - 1) {
-                null !== $this->sleep ? ($this->sleep)(1.0) : usleep(1_000_000);
-            }
-        }
-        if (!$answered) {
-            return 'the Traefik API does not answer';
+        $note(\sprintf('router: waiting up to %d s for the Traefik API', (int) self::WAIT_BUDGET));
+        if (!$this->poll(fn (): bool => null !== $this->live->names())) {
+            return 'the Traefik API does not answer within '.(int) self::WAIT_BUDGET.' s';
         }
 
         return $this->probe?->check();
     }
 
-    /** Puts the original static file back and restarts once more; returns what was done, for the error message. */
-    private function rollback(): string
+    /**
+     * Puts the original static file back and restarts once more (bounded like the first restart); returns what was done.
+     *
+     * @param \Closure(string): void $note
+     */
+    private function rollback(\Closure $note): string
     {
         if (!$this->copies->restoreStatic()) {
             return 'ROLLBACK FAILED: the original static file could not be restored; restore '.$this->copies->backupFile().' into the router by hand and restart ddev-router. The :443 mirror stays without PROXY.';
         }
-        $why = $this->router->restartForConfig() ?? $this->verifyRouter();
+        $note('router: original restored, restarting ddev-router again');
+        $why = $this->router->restartForConfig() ?? $this->verifyRouter($note);
         if (null !== $why) {
             return 'the original static configuration was restored but the router is still not healthy ('.$why.'): check ddev-router by hand. The :443 mirror stays without PROXY.';
         }
@@ -143,15 +172,33 @@ final readonly class RouterRefresh
 
     private function waitForTrust(string $name): bool
     {
-        for ($attempt = 0; $attempt < self::TRUST_WAIT_ATTEMPTS; ++$attempt) {
-            if (true === $this->live->proxyTrusted($name)) {
+        return $this->poll(fn (): bool => true === $this->live->proxyTrusted($name));
+    }
+
+    /**
+     * Calls `$check` until it is true or WAIT_BUDGET seconds have passed (measured, plus the sleeps a test injects): never an
+     * attempt count, because one API call can itself take seconds.
+     *
+     * @param \Closure(): bool $check
+     */
+    private function poll(\Closure $check): bool
+    {
+        $start = hrtime(true);
+        $slept = 0.0;
+        while (true) {
+            if ($check()) {
                 return true;
             }
-            if ($attempt < self::TRUST_WAIT_ATTEMPTS - 1) {
-                null !== $this->sleep ? ($this->sleep)(1.0) : usleep(1_000_000);
+            $elapsed = (hrtime(true) - $start) / 1e9 + (null !== $this->sleep ? $slept : 0.0);
+            if ($elapsed + self::POLL_SECONDS > self::WAIT_BUDGET) {
+                return false;
+            }
+            if (null !== $this->sleep) {
+                ($this->sleep)(self::POLL_SECONDS);
+                $slept += self::POLL_SECONDS;
+            } else {
+                usleep((int) (self::POLL_SECONDS * 1_000_000));
             }
         }
-
-        return false;
     }
 }

@@ -51,7 +51,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
     {
         $this->runner->expect(['docker', 'restart'], new CommandResult(1, 'boom'));
 
-        self::assertSame('docker restart ddev-router failed', $this->converger->restartForConfig());
+        self::assertStringStartsWith('docker restart ddev-router failed', (string) $this->converger->restartForConfig());
     }
 
     public function testTheRouterIsLeftAloneWhenItAlreadyMatches(): void

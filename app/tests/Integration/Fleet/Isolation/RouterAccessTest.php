@@ -73,6 +73,8 @@ final class RouterAccessTest extends InstanceJobTestCase
         $this->docker();
         @mkdir($this->traefik->dir(), 0o755, true);
         file_put_contents($this->traefik->staticFile(), "entryPoints:\n  fleet-mirror-443:\n    address: \":443\"\n");
+        @mkdir(\dirname($this->traefik->dynamicFile()), 0o755, true);
+        file_put_contents($this->traefik->dynamicFile(), "tcp:\n  services:\n    fleet-mirror-443:\n      loadBalancer:\n        servers:\n          - address: \"127.0.0.1:8443\"\n        proxyProtocol:\n          version: 2\n");
         $link = new ResolvedLink('acme--staging', 'acme', 'acme--main', 'acme', 'typesense', 8108, null, 'ddev-acme--staging-web', 'ddev-acme--main-typesense');
 
         self::assertNull($this->access->sync(IsolationMode::Enforce, [$link]));
@@ -125,15 +127,34 @@ final class RouterAccessTest extends InstanceJobTestCase
         self::assertSame(2 * 3, substr_count($text, 'entryPoints: [http-8080, http-8443]'));
     }
 
-    public function testWithNoLastFileAndTheApiDownTheDenyRoutersAreBoundToEveryEntryPoint(): void
+    public function testWithNoLastFileAndTheApiDownTheDenyRoutersBindToDdevsHttpEntryPointsNeverTheMirror(): void
     {
         $this->docker();
+        @mkdir(\dirname($this->traefik->globalConfigFile()), 0o755, true);
+        file_put_contents($this->traefik->globalConfigFile(), "router_http_port: 8080\nrouter_https_port: 8443\n");
         $down = new RouterAccess($this->instances, $this->instanceHostnames, new DockerNetworks($this->runner), $this->ddev, $this->traefik, new \App\Tests\Support\FakeLiveEntrypoints(null));
 
         self::assertNotNull($down->sync(IsolationMode::Enforce, []));
 
-        self::assertFileExists($down->file());
-        self::assertStringNotContainsString('entryPoints: [http', (string) file_get_contents($down->file()));
+        $text = (string) file_get_contents($down->file());
+        self::assertStringContainsString("      entryPoints: [http-8080, http-8443]\n", $text);
+        self::assertStringNotContainsString('fleet-mirror', $text);
+    }
+
+    public function testWithoutProxyOnTheMirrorThereAreNoSniRoutersOnTheSiteEntryPoint(): void
+    {
+        $this->docker();
+        @mkdir($this->traefik->dir(), 0o755, true);
+        file_put_contents($this->traefik->staticFile(), "entryPoints:\n  fleet-mirror-443:\n    address: \":443\"\n");
+        @mkdir(\dirname($this->traefik->dynamicFile()), 0o755, true);
+        // The mirror's dynamic file passes TLS through WITHOUT the PROXY header (degraded mode).
+        file_put_contents($this->traefik->dynamicFile(), "tcp:\n  services:\n    fleet-mirror-443:\n      loadBalancer:\n        servers:\n          - address: \"127.0.0.1:8443\"\n");
+
+        self::assertNull($this->access->sync(IsolationMode::Enforce, []));
+
+        $text = (string) file_get_contents($this->access->file());
+        self::assertStringNotContainsString('tcp:', $text);
+        self::assertStringNotContainsString('fleet-iso-deny-rest', $text);
     }
 
     public function testReportAndOffRemoveTheFile(): void
