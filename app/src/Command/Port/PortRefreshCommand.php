@@ -69,10 +69,10 @@ final class PortRefreshCommand extends Command
                     $err->writeln($line);
                 });
                 if ([] !== $router['lines'] || $router['restarted']) {
-                    try {
-                        $this->isolation?->pass(null, true);
-                    } catch (\Throwable) {
-                        // the watcher's next pass retries
+                    // `pass()` never throws: a failure comes back as `error`. Say so instead of hiding it (the watcher retries).
+                    $pass = $this->isolation?->pass(null, true);
+                    if (null !== $pass && !$pass->ok()) {
+                        $router['problems'][] = 'the follow-up isolation pass failed ('.$pass->error.'), the watcher retries';
                     }
                 }
                 $failed = $failed || [] !== $router['problems'];

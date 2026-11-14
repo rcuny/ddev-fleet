@@ -117,7 +117,7 @@ final class RouterRefreshTest extends PortMirrorTestCase
         self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'cp', '-f', self::STATIC_PATH]));
         // ... then written over, restarted, found unhealthy, restored (a second write of the static path) and restarted again.
         self::assertCount(2, $this->runner->callsMatching(['docker', 'restart', 'ddev-router']));
-        self::assertCount(2, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']));
+        self::assertCount(2, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f', self::STATIC_PATH.'.fleet-tmp', self::STATIC_PATH]));
         self::assertNotSame([], array_filter($result['problems'], static fn (string $p): bool => str_contains($p, 'not healthy') && str_contains($p, 'restored') && str_contains($p, 'NOT enforced on :443')), implode("\n", $result['problems']));
         self::assertStringNotContainsString('proxyProtocol', $this->dynamic());
     }
@@ -165,9 +165,7 @@ final class RouterRefreshTest extends PortMirrorTestCase
 
         $this->refresh->run();
 
-        $sh = $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']);
-        self::assertCount(1, $sh);
-        self::assertContains(self::STATIC_PATH, $sh[0]->argv);
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'mv', '-f', self::STATIC_PATH.'.fleet-tmp', self::STATIC_PATH]));
     }
 
     public function testWhenTheRouterStaticIsNotUpdatedTheMirrorStaysWithoutProxy(): void

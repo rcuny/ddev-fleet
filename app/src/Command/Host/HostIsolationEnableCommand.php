@@ -75,10 +75,9 @@ final class HostIsolationEnableCommand extends Command
                 $output->writeln($line);
             });
             // The mirror may carry PROXY now: the pass renders the router allow-list again with the :443 rules that depend on it.
-            try {
-                $this->converger->pass(null, true);
-            } catch (\Throwable $e) {
-                $output->writeln('<comment>isolation: the follow-up pass failed ('.$e->getMessage().'), the watcher retries</comment>');
+            $follow = $this->converger->pass(null, true);
+            if (!$follow->ok()) {
+                $output->writeln('<comment>isolation: the follow-up pass failed ('.$follow->error.'), the watcher retries</comment>');
             }
             foreach ($router['problems'] as $problem) {
                 $output->writeln('<error>router: '.$problem.'</error>');
