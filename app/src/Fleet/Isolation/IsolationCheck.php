@@ -17,7 +17,7 @@ use App\Fleet\Ddev\DdevUnavailable;
  * Mailpit port), the router's Traefik API, the bridge gateway's ssh port and the Internet, plus every live link. It asserts
  * only what the mode promises: enforce blocks the first four and allows the Internet and the links; off and report promise
  * nothing about reachability (a host firewall may block ssh, a stopped service answers nothing), so those probes are listed as
- * "any" and never fail. The Internet and live links must be reachable in every mode. In report and enforce mode br_netfilter
+ * "any" and never fail. The Internet must be reachable in every mode; live links in report and enforce (FLE-340: in off mode a link's dedicated network does not exist yet, so the link probe is "any"). In report and enforce mode br_netfilter
  * must be active, or the table sees no traffic inside a bridge.
  */
 final readonly class IsolationCheck
@@ -84,7 +84,7 @@ final readonly class IsolationCheck
             $rows[] = $this->probe($web, $from->id(), self::INTERNET_HOST, 'internet', self::INTERNET_PORT, true);
         }
         foreach ($links as $l) {
-            $rows[] = $this->probe('ddev-'.$l->sourceInstance.'-web', $l->sourceInstance, $l->alias(), 'link '.$l->targetInstance.'/'.$l->service, $l->port, true);
+            $rows[] = $this->probe('ddev-'.$l->sourceInstance.'-web', $l->sourceInstance, $l->alias(), 'link '.$l->targetInstance.'/'.$l->service, $l->port, IsolationMode::Off === $mode ? null : true);
         }
 
         return $rows;
