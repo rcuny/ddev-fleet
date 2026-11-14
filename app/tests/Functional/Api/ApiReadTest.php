@@ -441,6 +441,33 @@ final class ApiReadTest extends AdminTestCase
         $hub->useFactory(new LcobucciFactory('test-only-stream-secret-0123456789abcdef', 'hmac.sha256', 0, '', ProtocolVersion::Legacy));
     }
 
+    /**
+     * FLE-330: behind Caddy the app sees the request php_fastcgi builds (HTTPS=on, HTTP_HOST), and no framework
+     * trusted_proxies is set, so a spoofed X-Forwarded-* from a client can neither downgrade the scheme nor swap the host.
+     */
+    public function testStreamTokenHubUrlIsAbsoluteAndTakenFromTheCaddyRequestNotFromForwardedHeaders(): void
+    {
+        $this->enableHubTokens();
+        $job = $this->job('acme', JobStatus::Running);
+        $token = $this->issue([ApiScope::Read], ['acme']);
+
+        $this->client->request('POST', '/api/v1/jobs/'.$job->id().'/stream-token', server: [
+            'HTTP_AUTHORIZATION' => 'Bearer '.$token->secret,
+            'REMOTE_ADDR' => $this->clientIp,
+            'HTTP_X_FLEET_STAND_IN_ROLE' => 'none',
+            'HTTPS' => 'on',
+            'HTTP_HOST' => 'fleet.example.com',
+            'SERVER_PORT' => '443',
+            'HTTP_X_FORWARDED_HOST' => 'evil.example.net',
+            'HTTP_X_FORWARDED_PROTO' => 'http',
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        $body = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertIsArray($body);
+        self::assertSame('https://fleet.example.com/.well-known/mercure', $body['hub_url']);
+    }
+
     public function testStreamTokenIsSubscribeOnlyForThatJobsTopicAndExpires(): void
     {
         $this->enableHubTokens();

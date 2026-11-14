@@ -175,7 +175,7 @@ final class InstanceWatcher
             return;
         }
         try {
-            $pass = $this->network->pass();
+            $pass = $this->network->pass(fn (string $line) => $this->logger->warning($line));
         } catch (\Throwable $e) {
             $this->logger->error('The network isolation pass failed.', ['exception' => $e]);
 

@@ -328,14 +328,28 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $id = 'blog--main';
         $this->ps($id, $this->psRow($id, 'db'));
         $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1064 (42000)'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1125 (HY000): Function already exists'));
         $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1064 (42000)'));
         $lines = [];
 
         self::assertFalse($this->converger()->ensureSocketUser($id, static function (string $l) use (&$lines): void { $lines[] = $l; }));
 
-        self::assertCount(2, $this->runner->callsMatching(['docker', 'exec']));
-        self::assertContains(InstanceDbIsolationWriter::SOCKET_USER_SQL_MYSQL, $this->runner->callsMatching(['docker', 'exec'])[1]->argv);
+        self::assertCount(3, $this->runner->callsMatching(['docker', 'exec']));
+        self::assertContains(InstanceDbIsolationWriter::SOCKET_PLUGIN_SQL_MYSQL, $this->runner->callsMatching(['docker', 'exec'])[1]->argv);
+        self::assertContains(InstanceDbIsolationWriter::SOCKET_USER_SQL_MYSQL, $this->runner->callsMatching(['docker', 'exec'])[2]->argv);
         self::assertStringContainsString('WARNING', implode("\n", $lines));
+    }
+
+    public function testMysqlLoadsTheAuthSocketPluginBeforeCreatingTheUser(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1064 (42000)'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(0));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(0));
+
+        self::assertTrue($this->converger()->ensureSocketUser($id, static function (string $l): void {}));
+        self::assertStringContainsString('INSTALL PLUGIN auth_socket', InstanceDbIsolationWriter::SOCKET_PLUGIN_SQL_MYSQL);
     }
 
     public function testNoDbContainerMeansNoSocketUser(): void
@@ -366,6 +380,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $this->ps($id, $this->psRow($id, 'db'));
         $notice = 'mysql: [Warning] Using a password on the command line interface can be insecure.';
         $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', $notice."\nERROR 1064 (42000): syntax"));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', $notice));
         $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', $notice));
         $lines = [];
 

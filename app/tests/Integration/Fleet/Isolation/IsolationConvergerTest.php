@@ -74,6 +74,8 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             }
         };
 
+        $access = new \App\Fleet\Isolation\RouterAccess($this->instances, $this->instanceHostnames, $docker, $this->ddev, new \App\Fleet\PortMirror\TraefikDirectory($this->paths->home()));
+
         return new IsolationConverger(
             $this->host,
             new NamedPortRepository($this->em),
@@ -87,6 +89,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir())),
             new \App\Fleet\Isolation\NftablesServiceGuard($this->runner),
             new \App\Fleet\Isolation\BridgeNetfilterGuard($this->bridgeDir()),
+            $access,
         );
     }
 
@@ -128,6 +131,62 @@ final class IsolationConvergerTest extends InstanceJobTestCase
     {
         new ProjectLinkService(new ProjectRepository($this->em), new ProjectLinkRepository($this->em), new AuditLog(new AuditEntryRepository($this->em), $this->clock))
             ->create('acme', 'blog', 'typesense', 8108, 'same', 'search', 'admin');
+    }
+
+    private function routerFile(): string
+    {
+        return $this->paths->home().'/.ddev/traefik/custom-global-config/fleet-router-access.yaml';
+    }
+
+    private function plantRouterFile(): void
+    {
+        @mkdir(\dirname($this->routerFile()), 0o755, true);
+        file_put_contents($this->routerFile(), "stale\n");
+    }
+
+    public function testOffAlwaysRemovesTheRouterFileEvenWithNoRecordedRuleset(): void
+    {
+        $this->plantRouterFile();
+        $this->runner->reset();
+
+        $pass = $this->converger->pass();
+
+        self::assertSame(IsolationMode::Off, $pass->mode);
+        self::assertFileDoesNotExist($this->routerFile());
+    }
+
+    public function testReportModeRemovesTheRouterFile(): void
+    {
+        $this->plantRouterFile();
+        $this->mode(IsolationMode::Report);
+
+        $this->converger->pass();
+
+        self::assertFileDoesNotExist($this->routerFile());
+    }
+
+    public function testDisablingRemovesTheRouterFile(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $this->plantRouterFile();
+        $this->scriptDocker();
+
+        $this->converger->changeMode(IsolationMode::Off, 'admin');
+
+        self::assertFileDoesNotExist($this->routerFile());
+    }
+
+    /** FLE-326: a router-access problem (the API down, Docker unreadable) reaches the log the caller passes, so the journal shows it. */
+    public function testARouterAccessProblemIsLoggedThroughTheCallersLog(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $lines = [];
+
+        $this->converger->pass(static function (string $line) use (&$lines): void {
+            $lines[] = $line;
+        });
+
+        self::assertNotSame([], array_filter($lines, static fn (string $l): bool => str_contains($l, 'router access')), implode("\n", $lines));
     }
 
     public function testModeOffDoesNothingAtAll(): void
@@ -384,6 +443,32 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         foreach (\array_slice($this->staged, $before) as $ruleset) {
             self::assertNotSame(IsolationRuleset::disabled(), $ruleset, 'an enforce host never gets the table removed');
         }
+    }
+
+    /** FLE-326 N2: a link change waits for the pass in progress and then runs its own, instead of being dropped as "busy". */
+    public function testAPassThatWaitsRunsAfterTheOneInProgressInsteadOfBeingDropped(): void
+    {
+        $this->mode(IsolationMode::Report);
+        $code = '$a = $argv[1]; require $argv[2]; $l = (new Symfony\\Component\\Lock\\LockFactory(new Symfony\\Component\\Lock\\Store\\FlockStore($a)))->createLock("isolation.pass", 120.0); $l->acquire(true); echo "held\n"; usleep(1500000); $l->release();';
+        $process = new \Symfony\Component\Process\Process([\PHP_BINARY, '-r', $code, '--', $this->paths->locksDir(), \dirname(__DIR__, 4).'/vendor/autoload.php']);
+        $process->start();
+        $deadline = microtime(true) + 10;
+        while (!str_contains($process->getOutput(), 'held') && microtime(true) < $deadline) {
+            usleep(20000);
+        }
+        self::assertStringContainsString('held', $process->getOutput());
+        $this->scriptDocker();
+
+        self::assertTrue($this->converger->pass()->busy, 'without wait the pass is skipped');
+
+        $start = microtime(true);
+        $pass = $this->converger->pass(null, true);
+        $process->wait();
+
+        self::assertFalse($pass->busy);
+        self::assertTrue($pass->ok(), (string) $pass->error);
+        self::assertGreaterThan(0.5, microtime(true) - $start, 'it waited for the holder');
+        self::assertTrue($pass->applied, 'and ran its own pass afterwards');
     }
 
     public function testASecondPassWhileOneRunsDoesNothing(): void

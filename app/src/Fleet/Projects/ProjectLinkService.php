@@ -80,7 +80,7 @@ final readonly class ProjectLinkService
         $link = new ProjectLink($sourceProject, $targetProject, $service, $port, $label, trim($note), $actor);
         $this->links->save($link);
         $this->audit->record($actor, AuditLog::PROJECT_LINK_CREATE, self::describe($link));
-        $this->network?->pass();
+        $this->network?->pass(wait: true);
 
         return $link;
     }
@@ -97,7 +97,7 @@ final readonly class ProjectLinkService
         $this->links->delete($link);
         $this->audit->record($actor, AuditLog::PROJECT_LINK_DELETE, self::describe($link));
         // A deleted link closes at once, not at the next watcher pass (pass() never throws).
-        $this->network?->pass();
+        $this->network?->pass(wait: true);
     }
 
     public static function describe(ProjectLink $link): string

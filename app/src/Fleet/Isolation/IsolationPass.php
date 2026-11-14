@@ -7,7 +7,8 @@ namespace App\Fleet\Isolation;
 use App\Domain\Host\IsolationMode;
 
 /**
- * FLE-299: the result of one IsolationConverger pass. `error` is null on success; `applied` says whether a ruleset was installed.
+ * FLE-299: the result of one IsolationConverger pass. `error` is null on success; `applied` says whether a ruleset was installed; `busy` that another pass held the lock
+ * and this one did nothing (FLE-327: the events listener asks again).
  */
 final readonly class IsolationPass
 {
@@ -19,6 +20,7 @@ final readonly class IsolationPass
         public array $links = [],
         public bool $applied = false,
         public ?string $error = null,
+        public bool $busy = false,
     ) {
     }
 

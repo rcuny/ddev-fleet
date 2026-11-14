@@ -122,6 +122,8 @@ final class UninstallTest extends TestCase
         self::assertSame(0, $status, $err);
         foreach ([
             '+ systemctl disable --now fleet-status.service',
+            '+ systemctl disable --now fleet-isolation-watch.service',
+            '+ rm -f -- /etc/systemd/system/fleet-isolation-watch.service',
             '+ systemctl disable fleet-boot.service',
             '+ rm -f -- /etc/systemd/system/fleet-status.service',
             '+ rm -f -- /etc/systemd/system/fleet-boot.service',

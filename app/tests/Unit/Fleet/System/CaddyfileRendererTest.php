@@ -92,7 +92,7 @@ final class CaddyfileRendererTest extends TestCase
     {
         $out = self::renderer()->render(self::host());
 
-        self::assertStringContainsString("handle /.well-known/mercure* {\n            reverse_proxy ".CaddyfileRenderer::HUB." {\n                flush_interval -1\n            }\n        }\n", $out);
+        self::assertStringContainsString("handle /.well-known/mercure {\n            reverse_proxy ".CaddyfileRenderer::HUB." {\n                header_up Host {upstream_hostport}\n                flush_interval -1\n            }\n        }\n", $out);
         self::assertSame('127.0.0.1:3000', CaddyfileRenderer::HUB);
     }
 
@@ -371,8 +371,11 @@ final class CaddyfileRendererTest extends TestCase
 
                     import /etc/caddy/fleet/gate.conf
 
-                    handle /.well-known/mercure* {
+                    # Exact path (FLE-330): the hub's one public endpoint. header_up Host: the hub's own site block is
+                    # http://127.0.0.1:3000, so the public Host (<domain>) matches no site there and the hub answers an empty 200.
+                    handle /.well-known/mercure {
                         reverse_proxy 127.0.0.1:3000 {
+                            header_up Host {upstream_hostport}
                             flush_interval -1
                         }
                     }

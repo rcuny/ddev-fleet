@@ -188,6 +188,33 @@ final readonly class DockerNetworks
         return $this->change(['network', 'rm', $network]);
     }
 
+    public function routerRunning(): bool
+    {
+        return 'true' === trim((string) $this->inspect(['inspect', '--format', '{{.State.Running}}', self::ROUTER]));
+    }
+
+    /** The file as the running router sees it (null: missing or unreadable). */
+    public function routerRead(string $path): ?string
+    {
+        return $this->inspect(['exec', self::ROUTER, 'cat', $path]);
+    }
+
+    /**
+     * Puts a host file into the router's own Traefik directory: copied under a name Traefik ignores, then renamed, so its
+     * file watcher never reads a half-written file. DDEV copies `custom-global-config` there only at a `ddev start` (FLE-326).
+     */
+    public function routerPut(string $hostFile, string $path): bool
+    {
+        $tmp = $path.'.tmp';
+
+        return $this->change(['cp', $hostFile, self::ROUTER.':'.$tmp]) && $this->change(['exec', self::ROUTER, 'mv', '-f', $tmp, $path]);
+    }
+
+    public function routerRemove(string $path): bool
+    {
+        return $this->change(['exec', self::ROUTER, 'rm', '-f', $path, $path.'.tmp']);
+    }
+
     /**
      * @param list<string> $args
      *

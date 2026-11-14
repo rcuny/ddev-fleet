@@ -126,15 +126,29 @@ Debian's `nftables.service`, when enabled, loads a file that begins with `flush 
 
 ### After a plain `docker restart ddev-router`
 
-A restart that Fleet does itself refreshes the router's address in the table at once. A restart done by hand (or by DDEV) gives the router a new address that the table learns at the next pass: the status watcher notices the change within about two minutes, and in `enforce` mode the sites answer 502 from Caddy until then (measured on a throwaway host: up to about 3 minutes, mostly the watcher interval). This is the accepted window; the Docker events listener (a planned follow-up) closes it. Restart the router through Fleet (a start of any instance), or run `fleet host:isolation:enable --mode=enforce --yes` to force a pass.
+A restart that Fleet does itself refreshes the router's address in the table at once. A restart done by hand (or by DDEV) gives the router a new address that the table learns at the next pass: the status watcher notices the change within about two minutes, and in `enforce` mode the sites answer 502 from Caddy until then (measured on a throwaway host: up to about 3 minutes, mostly the watcher interval). The unit `fleet-isolation-watch` closes that window: it listens to `docker events` and runs a pass about a second after a ddev container or the `ddev_default` / `fleet-link-*` networks change (a plain `docker restart ddev-router` recovers in about a second; a router that comes back with a new address, within a second or two). If the unit is down, the status watcher's two-minute pass is the backstop. Check it with `systemctl status fleet-isolation-watch` and `journalctl -u fleet-isolation-watch`; to force a pass by hand run `fleet host:isolation:enable --mode=enforce --yes`.
 
 ### What it does not do
 
-- **The router stays reachable from instances.** An instance can still ask `ddev-router` for another instance's host name
-  and get it without the Authelia check (closing that needs a Traefik allow-list per instance; planned).
-- Network changes (a recreated container, a router restart) are caught by the two-minute watcher, a start, and the router
-  converge; a Docker events listener is planned. After a router restart, instances answer 502 from Caddy until the
-  router's new address reaches the table (immediately for a restart Fleet does, within about two minutes otherwise: see above).
+- **The router path is allow-listed per instance on `:8080` and `:8443` (`enforce` mode only), and stays OPEN on `:443`.** An instance can still *connect* to
+  `ddev-router` (the port mirror and in-container tests need it), but Fleet writes `~/.ddev/traefik/custom-global-config/fleet-router-access.yaml`:
+  for every instance a Traefik router (HTTP and HTTPS, priority 100000, bound to the router's live entry points except the mirror's `fleet-mirror-*` ones) that answers `noop@internal` (not the site) to a request
+  for the instance's host names unless the source is the `ddev_default` gateway (Caddy), the loopback, one of the instance's own
+  containers, or the web container of a live link's source. DDEV copies `custom-global-config` into the router's own volume only at a `ddev start`, so Fleet also puts the file into
+  `ddev-router` itself (`/mnt/ddev-global-cache/traefik/config/`, copied under a temporary name and renamed) on every isolation pass
+  and compares the router's copy with the host file; Traefik's file watcher loads it without a restart (enable, link
+  changes and disable take effect without any instance restart). The check `host:isolation:check` has a row for that copy.
+  `report` and `off` always remove it (every pass, even when no ruleset is recorded). **The `:443` site mirror is not covered:** it passes
+  connections through to the router's https entry point from the loopback, so the router sees the loopback, not the caller, and an
+  instance can still reach another instance by `Host` over `:443`; closing that (PROXY protocol on the re-entry and the router's static
+  configuration) is a separate ticket. The port mirror and the router's static configuration are unchanged by instance isolation, and
+  isolation never restarts the router. A declared link opens **all ports** of the target through the router for the link's source web container (the allow-list is by source address and host name, not by port); the link's own port limit applies only to the direct link network. If the Traefik API does not answer during a pass, the entry points of the last good file are kept (a warning is logged; with no earlier file the deny routers bind to every entry point until the API is back). Residuals: the TLS-terminating named-port mirrors
+  (for example Typesense on 9108) and `:443` still re-enter from the loopback, so an instance can reach another instance's site or *exposed service*
+  by `Host` there; and for about a second after a container gets a new address, its own request for its own host name through the
+  router is denied.
+- Network changes (a recreated container, a router restart) are caught by the Docker events listener (`fleet-isolation-watch`,
+  about a second), a start, the router converge and, as a backstop, the two-minute status watcher. After a router restart,
+  instances answer 502 from Caddy until the router's new address reaches the table (see above).
 - No egress filtering to the Internet, and no isolation inside one instance.
 
 ### Risks and how to roll back

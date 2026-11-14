@@ -18,7 +18,8 @@ The installer generates it once; a re-run only adds missing keys and never chang
 |---|---|
 | `APP_ENV`, `APP_DEBUG` | `prod`, `0`. The php-fpm pool also pins `APP_ENV=prod`. |
 | `APP_SECRET` | Generated once (64 hex characters). |
-| `MERCURE_JWT_SECRET` | Generated once; the hub's keys derive from it. |
+| `MERCURE_JWT_SECRET` | Generated once; signs the app's publisher tokens (the hub's publisher key). |
+| `MERCURE_SUBSCRIBER_JWT_SECRET` | Generated once, different from the publisher secret; signs subscriber tokens (the page cookie and `stream-token`), so a leaked subscriber key cannot publish. An install made before 1.12 gets it on its next upgrade; until then the app falls back to `MERCURE_JWT_SECRET`. |
 | `FLEET_PROXY_SECRET` | Generated once. Caddy passes it to PHP (`FLEET_PROXY_AUTH`); only a request carrying it may assert an identity. |
 | `FLEET_HOME` | `/srv/fleet`. |
 | `FLEET_RUNNER` | `process`: commands really run. |
