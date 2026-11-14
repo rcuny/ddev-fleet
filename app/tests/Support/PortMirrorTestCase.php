@@ -80,6 +80,15 @@ abstract class PortMirrorTestCase extends InstanceJobTestCase
         $this->hostSettings->save($host);
     }
 
+    /** FLE-336: the PROXY trust of the :443 mirror exists only in isolation enforce mode. */
+    protected function isolation(\App\Domain\Host\IsolationMode $mode): void
+    {
+        $host = $this->hostSettings->get();
+        self::assertNotNull($host);
+        $host->changeIsolationMode($mode, new \DateTimeImmutable());
+        $this->hostSettings->save($host);
+    }
+
     protected function read(string $file): string
     {
         return (string) file_get_contents($file);

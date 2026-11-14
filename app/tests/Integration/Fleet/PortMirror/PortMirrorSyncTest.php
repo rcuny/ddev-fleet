@@ -12,6 +12,10 @@ final class PortMirrorSyncTest extends PortMirrorTestCase
     private const string GOLDEN_STATIC = <<<'YAML'
         # Managed by ddev-fleet: do not edit.
         entryPoints:
+          http-8443:
+            proxyProtocol:
+              trustedIPs:
+                - "127.0.0.1/32"
           fleet-mirror-443:
             address: ":443"
           fleet-mirror-9108:
@@ -46,6 +50,8 @@ final class PortMirrorSyncTest extends PortMirrorTestCase
               loadBalancer:
                 servers:
                   - address: "127.0.0.1:8443"
+                proxyProtocol:
+                  version: 2
             fleet-mirror-9108:
               loadBalancer:
                 servers:
@@ -65,6 +71,7 @@ final class PortMirrorSyncTest extends PortMirrorTestCase
 
     public function testBothFilesAreWrittenByteForByte(): void
     {
+        $this->isolation(\App\Domain\Host\IsolationMode::Enforce);
         $this->typesenseAndMail();
 
         $result = $this->mirror->sync();
@@ -77,6 +84,20 @@ final class PortMirrorSyncTest extends PortMirrorTestCase
         self::assertSame(0o644, fileperms($this->traefik->staticFile()) & 0o777);
         self::assertSame($this->userHome.'/.ddev/traefik/static_config.fleet-port-mirror.yaml', $this->traefik->staticFile());
         self::assertSame($this->userHome.'/.ddev/traefik/custom-global-config/fleet-port-mirror.yaml', $this->traefik->dynamicFile());
+    }
+
+    public function testOutsideEnforceModeThereIsNoProxyTrustAndNoHeader(): void
+    {
+        $this->typesenseAndMail();
+
+        foreach ([\App\Domain\Host\IsolationMode::Off, \App\Domain\Host\IsolationMode::Report] as $mode) {
+            $this->isolation($mode);
+            $this->live->proxyTrusted = true;
+            $this->mirror->sync();
+
+            self::assertStringNotContainsString('proxyProtocol', $this->read($this->traefik->staticFile()));
+            self::assertStringNotContainsString('proxyProtocol', $this->read($this->traefik->dynamicFile()));
+        }
     }
 
     public function testWithoutASiteMirrorThereIsNoFourFortyThreeEntry(): void

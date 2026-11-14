@@ -22,6 +22,8 @@ final class PortRefreshCommand extends Command
         private readonly ProjectService $projects,
         private readonly InstanceSiteRefresher $sites,
         private readonly PortMirror $mirror,
+        private readonly \App\Fleet\PortMirror\RouterRefresh $router,
+        private readonly ?\App\Fleet\Isolation\IsolationConverger $isolation = null,
     ) {
         parent::__construct();
     }
@@ -37,7 +39,7 @@ final class PortRefreshCommand extends Command
         $out = JsonOutput::of($input, $output, FieldErrors::project());
         $failed = false;
 
-        $code = $out->run(function () use ($input, $out, &$failed): void {
+        $code = $out->run(function () use ($input, $output, $out, &$failed): void {
             $name = $input->getOption('project');
             $result = $this->sites->refresh(\is_string($name) && '' !== $name ? $this->projects->get($name) : null);
             $failed = [] !== $result->failed;
@@ -58,7 +60,29 @@ final class PortRefreshCommand extends Command
                 $failed = true;
             }
 
-            $out->emit(['rewritten' => $result->rewritten, 'failed' => (object) $result->failed, 'mirror' => $mirror], static function (JsonOutput $out) use ($result, $mirror, $mirrorError): void {
+            // FLE-326: the router reads its own copies of the mirror files; push them and restart it once if the static part changed.
+            $router = ['lines' => [], 'restarted' => false, 'problems' => []];
+            if (null === $mirrorError) {
+                // Progress goes to stderr (the document on stdout stays machine-readable): the waits are bounded but not instant.
+                $err = $output instanceof \Symfony\Component\Console\Output\ConsoleOutputInterface ? $output->getErrorOutput() : null;
+                $router = $this->router->run(null === $err ? null : static function (string $line) use ($err): void {
+                    $err->writeln($line);
+                });
+                if ([] !== $router['lines'] || $router['restarted']) {
+                    try {
+                        $this->isolation?->pass(null, true);
+                    } catch (\Throwable) {
+                        // the watcher's next pass retries
+                    }
+                }
+                $failed = $failed || [] !== $router['problems'];
+                if ($router['restarted']) {
+                    $mirror['state'] = $this->mirror->isLive() ? 'live' : 'pending';
+                }
+            }
+            $mirror['router'] = $router;
+
+            $out->emit(['rewritten' => $result->rewritten, 'failed' => (object) $result->failed, 'mirror' => $mirror], static function (JsonOutput $out) use ($result, $mirror, $mirrorError, $router): void {
                 $out->success(\sprintf('%d Caddy site(s) rewritten.', $result->rewritten));
                 foreach ($result->failed as $id => $reason) {
                     $out->fail(\sprintf('%s: %s', $id, $reason), JsonOutput::REFUSED);
@@ -66,6 +90,12 @@ final class PortRefreshCommand extends Command
                 $out->success('router mirror: '.$mirror['state']);
                 foreach ($mirror['skipped'] as $reason) {
                     $out->success('  '.$reason);
+                }
+                foreach ($router['lines'] as $line) {
+                    $out->success($line);
+                }
+                foreach ($router['problems'] as $problem) {
+                    $out->fail('router: '.$problem, JsonOutput::REFUSED);
                 }
                 if (null !== $mirrorError) {
                     $out->fail($mirrorError, JsonOutput::REFUSED);
