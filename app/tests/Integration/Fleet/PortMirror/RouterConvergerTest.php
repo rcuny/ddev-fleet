@@ -54,6 +54,24 @@ final class RouterConvergerTest extends PortMirrorTestCase
         self::assertStringStartsWith('docker restart ddev-router failed', (string) $this->converger->restartForConfig());
     }
 
+    /** FLE-336: the restart runs under the mirror lock and its isolation pass syncs the mirror files: that nested sync must not wait for (or lose to) our own lock. */
+    public function testTheMirrorSyncInsideTheRestartDoesNotDeadlockOnItsOwnLock(): void
+    {
+        $sync = null;
+        $this->runner->expect(['docker', 'restart'], new CommandResult(0, ''), function () use (&$sync): void {
+            $sync = $this->mirror->sync();
+        });
+        $this->runner->expect(['docker', 'inspect', '-f'], new CommandResult(0, "healthy\n"));
+        $started = microtime(true);
+
+        self::assertNull($this->converger->restartForConfig());
+
+        self::assertNotNull($sync, 'the nested sync ran');
+        self::assertSame([], array_filter($sync->skipped, static fn (string $s): bool => str_contains($s, 'lock')), 'it was not skipped as busy');
+        self::assertTrue($sync->changed, 'it wrote the files');
+        self::assertLessThan(5.0, microtime(true) - $started);
+    }
+
     public function testTheRouterIsLeftAloneWhenItAlreadyMatches(): void
     {
         $this->mirror->sync();
