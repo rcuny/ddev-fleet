@@ -86,7 +86,7 @@ final class RouterCopiesTest extends PortMirrorTestCase
 
         $repair = $this->copies->repair();
 
-        self::assertSame(['pushed' => [], 'restartNeeded' => false, 'problems' => []], $repair);
+        self::assertSame(['pushed' => [], 'restartNeeded' => false, 'problems' => [], 'staticDiffers' => false], $repair);
         self::assertSame([], $this->runner->callsMatching(['docker', 'cp']));
     }
 
@@ -105,7 +105,7 @@ final class RouterCopiesTest extends PortMirrorTestCase
     {
         $this->runner->expect(['docker', 'inspect', '--format', '{{.State.Running}}'], new CommandResult(1, ''));
 
-        self::assertSame(['pushed' => [], 'restartNeeded' => false, 'problems' => []], $this->copies->repair());
+        self::assertSame(['pushed' => [], 'restartNeeded' => false, 'problems' => [], 'staticDiffers' => false], $this->copies->repair());
         self::assertSame([], $this->copies->check());
     }
 
@@ -130,7 +130,7 @@ final class RouterCopiesTest extends PortMirrorTestCase
         $rows = $this->copies->check();
 
         $static = array_values(array_filter($rows, static fn (array $r): bool => str_contains($r['what'], 'static')));
-        self::assertSame('missing', $static[0]['actual']);
+        self::assertSame('unreachable', $static[0]['actual']);
         self::assertFalse($static[0]['ok']);
     }
 
@@ -142,7 +142,7 @@ final class RouterCopiesTest extends PortMirrorTestCase
         $rows = $this->copies->check();
 
         self::assertCount(3, $rows);
-        self::assertSame(['different', 'different', 'does not trust (restart pending)'], array_column($rows, 'actual'));
+        self::assertSame(['mismatch', 'mismatch', 'mismatch (restart pending)'], array_column($rows, 'actual'));
         self::assertSame([false, false, false], array_column($rows, 'ok'));
     }
 
@@ -165,5 +165,37 @@ final class RouterCopiesTest extends PortMirrorTestCase
 
         self::assertSame(['removed the port mirror dynamic file'], $repair['pushed']);
         self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'rm', '-f']));
+    }
+
+    public function testWithoutPushStaticADifferingStaticFileIsOnlyReported(): void
+    {
+        $this->router($this->hostDynamic(), $this->oldStatic());
+        $this->live->proxyTrusted = false;
+
+        $repair = $this->copies->repair(false);
+
+        self::assertTrue($repair['staticDiffers']);
+        self::assertFalse($repair['restartNeeded']);
+        self::assertSame([], $repair['pushed']);
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'cp']));
+        self::assertFileDoesNotExist($this->copies->backupFile());
+    }
+
+    public function testTheOriginalIsBackedUpBeforeTheStaticPushAndCanBeRestored(): void
+    {
+        $this->router($this->hostDynamic(), $this->oldStatic());
+        $this->live->proxyTrusted = false;
+
+        $repair = $this->copies->repair();
+
+        self::assertSame(['the port mirror static configuration'], $repair['pushed']);
+        self::assertSame($this->oldStatic(), (string) file_get_contents($this->copies->backupFile()));
+        $calls = array_map(static fn ($c): string => implode(' ', \array_slice($c->argv, 0, 5)), $this->runner->calls());
+        $backup = array_search('docker exec ddev-router cp -f', array_map(static fn (string $c): string => $c, $calls), true);
+        self::assertNotFalse($backup);
+
+        $this->runner->expect(['docker', 'exec', 'ddev-router', 'cat', self::STATIC_PATH], new CommandResult(0, 'merged'));
+        self::assertTrue($this->copies->restoreStatic());
     }
 }

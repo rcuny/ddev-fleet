@@ -229,6 +229,15 @@ final readonly class RouterAccess
     {
         $static = @file_get_contents($this->traefik->staticFile());
 
-        return \is_string($static) && str_contains($static, RouterAccessRenderer::SITE_ENTRYPOINT);
+        if (!\is_string($static)) {
+            return false;
+        }
+        try {
+            $data = \Symfony\Component\Yaml\Yaml::parse($static);
+        } catch (\Symfony\Component\Yaml\Exception\ParseException) {
+            return false;
+        }
+
+        return \is_array($data) && \is_array($data['entryPoints'] ?? null) && \array_key_exists(RouterAccessRenderer::SITE_ENTRYPOINT, $data['entryPoints']);
     }
 }

@@ -47,9 +47,15 @@ final readonly class PortMirror
         // FLE-326: the passthrough may send a PROXY header only to a router whose LIVE static configuration already trusts it (an
         // unreachable API counts as "does not"): otherwise own-name HTTPS over :443 would close. The trust comes first, then the header.
         // FLE-336: and only while isolation is in `enforce` mode: in `off` and `report` the static configuration and the mirror stay as they were before.
-        $trust = IsolationMode::Enforce === $this->settings->get()?->isolationMode();
+        $trust = $this->isolationEnforced();
 
         return $plan->withProxy($trust && true === $this->live->proxyTrusted(MirrorPlan::siteTargetEntrypoint($plan->siteTarget)), $trust);
+    }
+
+    /** FLE-336: the router's static configuration and PROXY header are touched in this mode only. */
+    public function isolationEnforced(): bool
+    {
+        return IsolationMode::Enforce === $this->settings->get()?->isolationMode();
     }
 
     public function enabled(): bool

@@ -25,6 +25,7 @@ final readonly class RouterRefresh
         private PortMirror $mirror,
         private LiveEntrypoints $live,
         private ?\Closure $sleep = null,
+        private ?RouterProbe $probe = null,
     ) {
     }
 
@@ -41,27 +42,39 @@ final readonly class RouterRefresh
         } catch (\RuntimeException $e) {
             return ['lines' => [], 'restarted' => false, 'problems' => ['the mirror files could not be written: '.$e->getMessage()]];
         }
-        $repair = $this->copies->repair();
+        $enforce = $this->mirror->isolationEnforced();
+        // Outside enforce mode the router's static configuration is never pushed and the router never restarted: a difference is only reported.
+        $repair = $this->copies->repair($enforce);
         foreach ($repair['pushed'] as $what) {
             $lines[] = 'router: pushed '.$what;
         }
         $problems = [...$problems, ...$repair['problems']];
+        if (!$enforce) {
+            if ($repair['staticDiffers']) {
+                $lines[] = 'router: its static configuration differs from the port mirror fragment; not applied, isolation is not in enforce mode';
+            }
+
+            return ['lines' => $lines, 'restarted' => false, 'problems' => $problems];
+        }
 
         if ($repair['restartNeeded']) {
             $lines[] = 'router: the static configuration changed, restarting ddev-router once (every instance blinks for a few seconds)';
-            $why = $this->router->restartForConfig();
+            $why = $this->router->restartForConfig() ?? $this->verifyRouter();
             if (null === $why) {
                 $restarted = true;
                 $lines[] = 'router: ddev-router restarted and healthy';
             } else {
-                $problems[] = 'the router restart failed: '.$why;
+                $problems[] = 'the router is not healthy after the restart ('.$why.'): '.$this->rollback();
+                $this->settleMirrorWithoutProxy();
+
+                return ['lines' => $lines, 'restarted' => true, 'problems' => $problems];
             }
         }
 
         $plan = $this->mirror->plan();
         $site = $plan->siteTarget;
         if (null === $site || !$plan->trust) {
-            // No :443 mirror, or isolation is not in enforce mode: no PROXY trust is wanted, nothing more to wait for (FLE-336).
+            // No :443 mirror: no PROXY trust is wanted, nothing more to wait for.
             return ['lines' => $lines, 'restarted' => $restarted, 'problems' => $problems];
         }
         $name = MirrorPlan::siteTargetEntrypoint($site);
@@ -85,6 +98,47 @@ final readonly class RouterRefresh
         }
 
         return ['lines' => $lines, 'restarted' => $restarted, 'problems' => $problems];
+    }
+
+    /** Container healthy is checked by the restart itself; here: the Traefik API answers and a real request is routed. */
+    private function verifyRouter(): ?string
+    {
+        $answered = false;
+        for ($attempt = 0; $attempt < self::TRUST_WAIT_ATTEMPTS && !$answered; ++$attempt) {
+            $answered = null !== $this->live->names();
+            if (!$answered && $attempt < self::TRUST_WAIT_ATTEMPTS - 1) {
+                null !== $this->sleep ? ($this->sleep)(1.0) : usleep(1_000_000);
+            }
+        }
+        if (!$answered) {
+            return 'the Traefik API does not answer';
+        }
+
+        return $this->probe?->check();
+    }
+
+    /** Puts the original static file back and restarts once more; returns what was done, for the error message. */
+    private function rollback(): string
+    {
+        if (!$this->copies->restoreStatic()) {
+            return 'ROLLBACK FAILED: the original static file could not be restored; restore '.$this->copies->backupFile().' into the router by hand and restart ddev-router. The :443 mirror stays without PROXY.';
+        }
+        $why = $this->router->restartForConfig() ?? $this->verifyRouter();
+        if (null !== $why) {
+            return 'the original static configuration was restored but the router is still not healthy ('.$why.'): check ddev-router by hand. The :443 mirror stays without PROXY.';
+        }
+
+        return 'the original static configuration was restored and the router restarted; instance isolation is NOT enforced on :443 and the mirror stays without PROXY.';
+    }
+
+    /** After a rollback the router does not trust the header (API says so), so this rewrites the mirror without it and pushes that. */
+    private function settleMirrorWithoutProxy(): void
+    {
+        try {
+            $this->mirror->sync();
+            $this->copies->repair(false);
+        } catch (\RuntimeException) {
+        }
     }
 
     private function waitForTrust(string $name): bool

@@ -54,17 +54,21 @@ final readonly class RouterCopies
         $hostDynamic = @file_get_contents($this->traefik->dynamicFile());
         $copy = $this->read($this->dynamicPath());
         if (\is_string($hostDynamic)) {
-            $rows[] = ['what' => 'port mirror dynamic file in ddev-router', 'expected' => 'same as the host file', 'actual' => null === $copy ? 'missing' : ($copy === $hostDynamic ? 'same' : 'different'), 'ok' => $copy === $hostDynamic];
+            $rows[] = ['what' => 'port mirror dynamic file in ddev-router', 'expected' => 'same as the host file', 'actual' => null === $copy ? 'unreachable' : ($copy === $hostDynamic ? 'match' : 'mismatch'), 'ok' => $copy === $hostDynamic];
         } elseif (null !== $copy) {
             $rows[] = ['what' => 'port mirror dynamic file in ddev-router', 'expected' => 'absent (no mirror)', 'actual' => 'present', 'ok' => false];
         }
         $fragment = $this->fragment();
         if (null !== $fragment) {
             [$state] = $this->staticState($fragment);
-            $rows[] = ['what' => 'port mirror static configuration in ddev-router', 'expected' => 'contains the fragment', 'actual' => $state, 'ok' => 'same' === $state];
+            $rows[] = ['what' => 'port mirror static configuration in ddev-router', 'expected' => 'contains the fragment', 'actual' => match ($state) {
+                'same' => 'match',
+                'different' => 'mismatch',
+                default => 'unreachable',
+            }, 'ok' => 'same' === $state];
             foreach ($this->trusting($fragment) as $name) {
                 $trusted = $this->live->proxyTrusted($name);
-                $rows[] = ['what' => 'live entry point '.$name, 'expected' => 'trusts a PROXY header from the loopback', 'actual' => null === $trusted ? 'unknown (API)' : ($trusted ? 'trusts' : 'does not trust (restart pending)'), 'ok' => true === $trusted];
+                $rows[] = ['what' => 'live entry point '.$name, 'expected' => 'trusts a PROXY header from the loopback', 'actual' => null === $trusted ? 'unreachable (Traefik API)' : ($trusted ? 'match' : 'mismatch (restart pending)'), 'ok' => true === $trusted];
             }
         }
 
@@ -72,13 +76,15 @@ final readonly class RouterCopies
     }
 
     /**
-     * Pushes what differs.
+     * Pushes what differs. The router's STATIC configuration is pushed only when `$pushStatic` is true (isolation enforce, from
+     * `port:refresh` / `host:isolation:enable`): otherwise a differing static copy is only reported (`staticDiffers`), never touched.
+     * Before a static push the router's file is backed up, in the router and on the host ({@see self::restoreStatic()}).
      *
-     * @return array{pushed: list<string>, restartNeeded: bool, problems: list<string>}
+     * @return array{pushed: list<string>, restartNeeded: bool, problems: list<string>, staticDiffers: bool}
      */
-    public function repair(): array
+    public function repair(bool $pushStatic = true): array
     {
-        $result = ['pushed' => [], 'restartNeeded' => false, 'problems' => []];
+        $result = ['pushed' => [], 'restartNeeded' => false, 'problems' => [], 'staticDiffers' => false];
         if (!$this->traefik->exists() || !$this->running()) {
             return $result;
         }
@@ -104,8 +110,19 @@ final readonly class RouterCopies
         if (null === $fragment) {
             return $result;
         }
-        [$state, $path, $merged] = $this->staticState($fragment);
-        if ('different' === $state && null !== $path && null !== $merged) {
+        [$state, $path, $merged, $original] = $this->staticState($fragment);
+        $result['staticDiffers'] = 'different' === $state;
+        if (!$pushStatic) {
+            return $result;
+        }
+        if ('unsafe' === $state) {
+            $result['problems'][] = 'the merge into the router\'s static configuration would lose a key of the original: nothing pushed, the :443 mirror stays without PROXY';
+        } elseif ('different' === $state && null !== $path && null !== $merged && null !== $original) {
+            if (!$this->backup($path, $original)) {
+                $result['problems'][] = 'the router\'s static configuration could not be backed up: nothing pushed, the :443 mirror stays without PROXY';
+
+                return $result;
+            }
             $tmp = $this->traefik->dir().'/.fleet-static-merge.tmp';
             try {
                 if (false === @file_put_contents($tmp, $merged)) {
@@ -115,7 +132,9 @@ final readonly class RouterCopies
                     $result['pushed'][] = 'the port mirror static configuration';
                     $result['restartNeeded'] = true;
                 } else {
-                    $result['problems'][] = 'the port mirror static configuration could not be copied into the router';
+                    // A half-written file must not stay: put the original back (the router has not been restarted).
+                    $this->restoreStatic();
+                    $result['problems'][] = 'the port mirror static configuration could not be copied into the router (the original was restored)';
                 }
             } catch (\Throwable $e) {
                 $result['problems'][] = 'the port mirror static configuration was not pushed: '.$e->getMessage();
@@ -134,6 +153,49 @@ final readonly class RouterCopies
         }
 
         return $result;
+    }
+
+    /** Host copy of the router's static file before Fleet changes it (and `<file>.fleet-backup` inside the router). */
+    public function backupFile(): string
+    {
+        return $this->traefik->dir().'/.fleet-router-static.backup';
+    }
+
+    /** @return bool true when the original is saved in the router and on the host */
+    private function backup(string $path, string $text): bool
+    {
+        if ('' === trim($text)) {
+            return false;
+        }
+        if (false === @file_put_contents($this->backupFile(), $text)) {
+            return false;
+        }
+
+        return $this->exec(['cp', '-f', $path, $path.'.fleet-backup']);
+    }
+
+    /**
+     * Puts the saved original back into the router's static file (the caller restarts the router).
+     *
+     * @return bool false when there is no backup or it could not be written
+     */
+    public function restoreStatic(): bool
+    {
+        $path = null;
+        foreach ($this->staticCandidates() as $candidate) {
+            if (null !== $this->read($candidate)) {
+                $path = $candidate;
+                break;
+            }
+        }
+        if (null === $path) {
+            return false;
+        }
+        if (is_file($this->backupFile()) && $this->put($this->backupFile(), $path, true)) {
+            return true;
+        }
+
+        return $this->exec(['sh', '-c', 'test -s "$0.fleet-backup" && cat "$0.fleet-backup" > "$0"', $path]);
     }
 
     /** @return array<string, mixed>|null the host's static fragment, null when absent or unreadable */
@@ -173,7 +235,7 @@ final readonly class RouterCopies
     /**
      * @param array<string, mixed> $fragment
      *
-     * @return array{0: string, 1: string|null, 2: string|null} state (same|different|missing), the router's static file, the merged text to write
+     * @return array{0: string, 1: string|null, 2: string|null, 3: string|null} state (same|different|missing|unsafe), the router's static file, the merged text to write, the file's current text
      */
     private function staticState(array $fragment): array
     {
@@ -185,18 +247,46 @@ final readonly class RouterCopies
             try {
                 $current = Yaml::parse($text);
             } catch (ParseException) {
-                return ['missing', $path, null];
+                return ['missing', $path, null, null];
             }
             if (!\is_array($current)) {
-                return ['missing', $path, null];
+                return ['missing', $path, null, null];
             }
             $merged = array_replace_recursive($current, $fragment);
+            if ($merged == $current) {
+                return ['same', $path, null, $text];
+            }
+            $dump = Yaml::dump($merged, 10, 2);
+            try {
+                $round = Yaml::parse($dump);
+            } catch (ParseException) {
+                return ['unsafe', $path, null, null];
+            }
 
-            return $merged == $current ? ['same', $path, null] : ['different', $path, Yaml::dump($merged, 10, 2)];
+            // Every key of DDEV's own file must survive the re-dump (comments do not, DDEV renders the file again at a `ddev start`).
+            return \is_array($round) && $round == $merged && self::keepsKeys($current, $round) ? ['different', $path, $dump, $text] : ['unsafe', $path, null, null];
         }
 
         // Never "unknown": a static file that cannot be read is a mismatch (and nothing is pushed or restarted for it).
-        return ['missing', null, null];
+        return ['missing', null, null, null];
+    }
+
+    /**
+     * @param array<mixed> $original
+     * @param array<mixed> $result
+     */
+    private static function keepsKeys(array $original, array $result): bool
+    {
+        foreach ($original as $key => $value) {
+            if (!\array_key_exists($key, $result)) {
+                return false;
+            }
+            if (\is_array($value) && (!\is_array($result[$key]) || !self::keepsKeys($value, $result[$key]))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

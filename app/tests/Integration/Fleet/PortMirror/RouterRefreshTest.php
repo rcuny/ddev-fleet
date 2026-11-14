@@ -22,6 +22,7 @@ final class RouterRefreshTest extends PortMirrorTestCase
     {
         parent::setUp();
         $this->isolation(\App\Domain\Host\IsolationMode::Enforce);
+        $this->live->script(['http-8443']); // the Traefik API answers
         $this->catalogue(new NamedPort('typesense', 9108, 8108));
         $this->globalConfig("router_https_port: 8443\n");
         $copies = new RouterCopies($this->runner, $this->traefik, $this->live);
@@ -80,10 +81,60 @@ final class RouterRefreshTest extends PortMirrorTestCase
         self::assertStringNotContainsString('proxyProtocol', $this->dynamic());
     }
 
+    public function testInReportModeADifferingStaticFileIsOnlyReportedNeverPushedOrRestarted(): void
+    {
+        $this->isolation(\App\Domain\Host\IsolationMode::Report);
+        $this->live->proxyTrusted = false;
+        $this->ddev125Router(self::OLD_STATIC);
+
+        $result = $this->refresh->run();
+
+        self::assertSame([], $this->runner->callsMatching(['docker', 'restart']));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']), 'the static file is not written');
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'cp']), 'no backup either, nothing to change');
+        self::assertFalse($result['restarted']);
+        self::assertNotSame([], array_filter($result['lines'], static fn (string $l): bool => str_contains($l, 'not applied')));
+    }
+
+    public function testAnUnhealthyRouterAfterTheRestartGetsItsOriginalStaticFileBack(): void
+    {
+        $this->live->proxyTrusted = false;
+        $this->live->script(null); // the API never answers after the restart
+        $this->ddev125Router(self::OLD_STATIC);
+        $this->runner->expect(['docker', 'inspect', '-f'], new CommandResult(0, "healthy\n"));
+        $this->runner->expect(['docker', 'inspect', '-f'], new CommandResult(0, "healthy\n"));
+        $this->runner->expect(['docker', 'restart', 'ddev-router'], new CommandResult(0, ''));
+        // The restored original makes the router answer again.
+        $this->runner->expect(['docker', 'restart', 'ddev-router'], new CommandResult(0, ''), function (): void {
+            $this->live->script(['http-8443']);
+        });
+
+        $result = $this->refresh->run();
+
+        // The original was saved first (host file and a copy inside the router) ...
+        self::assertFileExists($this->traefik->dir().'/.fleet-router-static.backup');
+        self::assertSame(self::OLD_STATIC, (string) file_get_contents($this->traefik->dir().'/.fleet-router-static.backup'));
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'cp', '-f', self::STATIC_PATH]));
+        // ... then written over, restarted, found unhealthy, restored (a second write of the static path) and restarted again.
+        self::assertCount(2, $this->runner->callsMatching(['docker', 'restart', 'ddev-router']));
+        self::assertCount(2, $this->runner->callsMatching(['docker', 'exec', 'ddev-router', 'sh', '-c']));
+        self::assertNotSame([], array_filter($result['problems'], static fn (string $p): bool => str_contains($p, 'not healthy') && str_contains($p, 'restored') && str_contains($p, 'NOT enforced on :443')), implode("\n", $result['problems']));
+        self::assertStringNotContainsString('proxyProtocol', $this->dynamic());
+    }
+
+    public function testTheProbeHasNothingToCheckWithoutARunningInstance(): void
+    {
+        $probe = new \App\Fleet\PortMirror\RouterProbe(new \App\Domain\Instance\InstanceRepository($this->em), new \App\Fleet\Instances\InstanceHostnames($this->hostSettings), $this->runner);
+
+        self::assertNull($probe->check());
+        self::assertSame([], $this->runner->callsMatching(['curl']));
+    }
+
     public function testTheStaticFileIsFoundThroughTheSymlinkOfDdev125AndPushedThere(): void
     {
         $this->live->proxyTrusted = false;
         $this->ddev125Router(self::OLD_STATIC);
+        $this->runner->expect(['docker', 'inspect', '-f'], new CommandResult(0, "healthy\n"));
 
         $this->refresh->run();
 

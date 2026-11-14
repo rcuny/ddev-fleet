@@ -375,14 +375,15 @@ final class IsolationConverger
         } catch (\RuntimeException $e) {
             $log('isolation: the port mirror files could not be written: '.$e->getMessage());
         }
-        $repair = $this->routerCopies->repair();
+        // A pass never pushes the static configuration (that, with its backup and the one restart, is `fleet port:refresh`).
+        $repair = $this->routerCopies->repair(false);
         foreach ($repair['pushed'] as $what) {
             $log('isolation: pushed '.$what.' into ddev-router');
         }
         foreach ($repair['problems'] as $problem) {
             $log('isolation: '.$problem);
         }
-        if ($repair['restartNeeded'] && IsolationMode::Enforce === $mode) {
+        if (($repair['staticDiffers'] || $repair['restartNeeded']) && IsolationMode::Enforce === $mode) {
             $log('isolation: ddev-router has not restarted since its static configuration changed (the PROXY trust of the :443 mirror is not live, isolation is NOT enforced on :443): run "fleet port:refresh"');
         }
     }
