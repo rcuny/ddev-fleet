@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-11-16
+
+### Fixed
+- **FLE-352:** terminal input over the API (`POST /api/v1/instances/{id}/terminal`) refused every agent started with `ddev exec` (`409 pane_not_agent`), because the host pane shows `ddev` instead of `claude`. The gate now looks into the instance container: exactly one matching terminal session whose foreground leaf is `claude` is accepted, anything else (shells, `ddev ssh`, several sessions, a failed lookup) is still refused.
+
 ## [1.13.0] - 2026-11-16
 
 ### Added
@@ -1644,7 +1649,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.13.1...HEAD
+[1.13.1]: https://github.com/rcuny/ddev-fleet/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/rcuny/ddev-fleet/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/rcuny/ddev-fleet/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/rcuny/ddev-fleet/compare/v1.12.0...v1.12.1
