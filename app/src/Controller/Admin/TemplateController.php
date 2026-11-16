@@ -104,6 +104,7 @@ final class TemplateController extends AbstractController
                         sshIdentities: SshIdentities::tryFrom(self::text($data['sshIdentities'] ?? null)) ?? SshIdentities::PushAndExtras,
                         database: (bool) ($data['database'] ?? false),
                         agent: (bool) ($data['agent'] ?? false),
+                        mailpit: (bool) ($data['mailpit'] ?? false),
                         cpuThreads: self::optionalInt($data['cpuThreads'] ?? null),
                         slots: self::optionalInt($data['slots'] ?? null),
                     ));
@@ -138,6 +139,7 @@ final class TemplateController extends AbstractController
             'sshIdentities' => $stored->sshIdentities()->value,
             'database' => $stored->hasDatabase(),
             'agent' => $stored->isAgent(),
+            'mailpit' => $stored->hasMailpit(),
             'cpuThreads' => $stored->cpuThreads(),
             'slots' => $stored->slots(),
         ], ['mode' => TemplateType::EDIT] + $this->projectLimits($project));
@@ -157,6 +159,7 @@ final class TemplateController extends AbstractController
                         'sshIdentities' => SshIdentities::tryFrom(self::text($data['sshIdentities'] ?? null)) ?? SshIdentities::PushAndExtras,
                         'database' => (bool) ($data['database'] ?? false),
                         'agent' => (bool) ($data['agent'] ?? false),
+                        'mailpit' => (bool) ($data['mailpit'] ?? false),
                         'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
                         'slots' => self::optionalInt($data['slots'] ?? null),
                     ]));

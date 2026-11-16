@@ -212,6 +212,7 @@ final class ProjectServiceTest extends KernelTestCase
         yield 'git over http' => [['git' => 'http://x.example.com/y'], 'git'];
         yield 'name with capitals' => [['name' => 'Bad'], 'name'];
         yield 'reserved name' => [['name' => 'new'], 'name'];
+        yield 'mailpit is reserved (host of an instance mailpit)' => [['name' => 'mailpit'], 'name'];
         yield 'branch starting with a dash' => [['defaultBranch' => '-x'], 'defaultBranch'];
         yield 'hostname with a dot' => [['additionalHostnames' => ['a.b']], 'additionalHostnames'];
         yield 'fifty-one hostnames' => [['additionalHostnames' => array_map(static fn (int $i): string => 'h'.$i, range(1, 51))], 'additionalHostnames'];

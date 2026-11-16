@@ -599,6 +599,7 @@ final readonly class ProjectImporter
             sshIdentities: SshIdentities::from($template['ssh_identities']),
             database: $template['database'],
             agent: $template['agent'],
+            mailpit: $template['mailpit'],
         );
     }
 

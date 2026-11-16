@@ -61,9 +61,15 @@
                         </div>
                     {% endif %}
                     {% if mailpit %}
-                        <div data-testid="mailpit-credentials">
-                            <dt class="text-sm text-ink-muted">Mailpit login</dt>
-                            <dd class="[overflow-wrap:anywhere]"><span class="font-mono">{{ mailpit.user }}</span> / <span class="font-mono">{{ mailpit.password }}</span></dd>
+                        <div data-testid="instance-mail">
+                            <dt class="text-sm text-ink-muted">Mail</dt>
+                            <dd class="[overflow-wrap:anywhere]">
+                                {% if mailpit.url %}
+                                    <a href="{{ mailpit.url }}" target="_blank" rel="noopener" class="inline-flex min-h-11 items-center md:min-h-0" data-testid="mailpit-link">Open Mailpit</a>
+                                {% else %}
+                                    <span data-testid="mailpit-notice">{{ mailpit.notice }}</span>
+                                {% endif %}
+                            </dd>
                         </div>
                     {% endif %}
                 </dl>

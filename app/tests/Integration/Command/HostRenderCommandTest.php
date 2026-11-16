@@ -271,6 +271,7 @@ final class HostRenderCommandTest extends KernelTestCase
             new LockFactory(new FlockStore($this->fx->paths->locksDir())),
             $this->fx->admins,
             new \App\Domain\Project\ProjectRepository($this->em),
+            new \App\Fleet\Instances\MailpitExposure(new \App\Domain\Template\TemplateRepository($this->em), new \App\Fleet\Instances\InstanceIsolation(new \App\Domain\Template\TemplateRepository($this->em), new \App\Fleet\Jobs\RegisteredSecretsMasker(), $runner, 'test-secret'), new InstanceHostnames($this->fx->settings), new \App\Fleet\Jobs\RegisteredSecretsMasker()),
         );
 
         return new AccessModelUpgrade(

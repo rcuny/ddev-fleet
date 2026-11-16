@@ -1,0 +1,20 @@
+{% autoescape false %}
+{# The instance's Mailpit (FLE-344), behind exactly the gate of the instance. Caddy sets Mailpit's own basic-auth header, so
+   the user signs in once; the client's Authorization header never reaches it. #}
+{% if wildcard %}
+
+@m_{{ id }} host {{ mailpit.host }}
+handle @m_{{ id }} {
+{% include 'system/instance-mailpit-route.twig' %}}
+{% else %}
+
+{{ mailpit.host }} {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Robots-Tag "noindex, nofollow"
+        -Server
+    }
+
+{% include 'system/instance-mailpit-route.twig' %}}
+{% endif %}
+{% endautoescape %}

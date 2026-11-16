@@ -45,6 +45,7 @@ final readonly class InstanceSiteWriter
         private LockFactory $locks,
         private AdminGroup $admins,
         private ProjectRepository $projects,
+        private MailpitExposure $mailpit,
     ) {
     }
 
@@ -79,6 +80,8 @@ final readonly class InstanceSiteWriter
             'groups_pattern' => $this->groupsPattern($project),
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
+            'mailpit' => $this->mailpit->site($instance, $project),
+            'mailpit_router' => CaddyfileRenderer::DDEV_ROUTER_HOST.':'.CaddyfileRenderer::DDEV_MAILPIT_PORT,
         ];
         // Wildcard layout: the site is a fragment of the host's wildcard site and the named ports are a second file.
         // The other layout has everything in the one file and no ports file.

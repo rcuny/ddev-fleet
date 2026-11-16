@@ -58,7 +58,7 @@ The browser and the commands apply the same rules and refuse a bad value with th
 
 ### Names (project, template, port)
 
-1 to 40 characters: lowercase letters, digits, single dashes, starting and ending with a letter or digit, no `--`. Unique. `new` is reserved (allowed for a port).
+1 to 40 characters: lowercase letters, digits, single dashes, starting and ending with a letter or digit, no `--`. Unique. `new` is reserved (allowed for a port). A project may not be called `mailpit`: `mailpit--<instance id>` is the host name of an instance's Mailpit, so no instance id may start with it (a template or a port may use the name).
 
 ### Project
 
@@ -83,6 +83,8 @@ The browser and the commands apply the same rules and refuse a bad value with th
 | Extra SSH keys | Max 8 names of keys at `ssh/<name>_ed25519` in the fleet home (mode `0600`, owned by the fleet user; `deploy` and `push` are reserved). Needs git over SSH in the container on the project. Only the name is stored. Manage the keys with `fleet ssh:key:*` or the SSH keys tab ([14-ssh-keys.md](14-ssh-keys.md)). |
 | SSH identities | `push_and_extras` (default) or `extras_only` (the agent gets no push key; needs at least one extra key). See [14-ssh-keys.md](14-ssh-keys.md). |
 | Post-deploy, terminal 1, terminal 2 | Each max 50 lines of 2000 characters (the whole list at most 100 100 characters), valid UTF-8, **one command per line**. Every control character is refused (newline, tab, escape, NUL), as are Unicode line and format separators. Blank lines are dropped, spaces trimmed. |
+| Database | Yes by default. No poisons the database host (`FLEET_HAS_DB=0`), see [instance isolation](09-networking.md#isolation-between-instances). |
+| Mailpit | Off by default (`--mailpit=yes\|no`, checkbox right after the database option). On: the instance's Mailpit is served at `https://mailpit--<instance id>.<domain>`, see [networking](09-networking.md#the-instances-mailpit). |
 | CPU threads, slots | As the project; a template may not exceed its project. |
 
 **How post-deploy lines run.** On the host, in the instance's checkout, as an argument list and never through a shell. Quotes and backslashes group words; an unquoted `|`, `&`, `;`, `<`, `>`, `$`, backtick, `(`, `)`, `{` or `}` is refused when the deploy runs, with a hint: write `ddev exec '...'` for a command that needs the container's shell. `[[token]]` placeholders are substituted after splitting. A failing line fails the deploy. Terminal lines are typed into tmux panes on the host instead (`ddev logs -f` is fine there).

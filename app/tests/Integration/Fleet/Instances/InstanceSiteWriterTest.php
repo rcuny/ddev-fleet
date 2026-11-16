@@ -54,6 +54,7 @@ final class InstanceSiteWriterTest extends KernelTestCase
             new LockFactory(new FlockStore($this->paths->locksDir())),
             new AdminGroup('fleet-admins'),
             new ProjectRepository($em),
+            new \App\Fleet\Instances\MailpitExposure(new \App\Domain\Template\TemplateRepository($em), new \App\Fleet\Instances\InstanceIsolation(new \App\Domain\Template\TemplateRepository($em), new \App\Fleet\Jobs\RegisteredSecretsMasker(), $this->runner, 'test-secret'), new InstanceHostnames($host), new \App\Fleet\Jobs\RegisteredSecretsMasker()),
         );
     }
 

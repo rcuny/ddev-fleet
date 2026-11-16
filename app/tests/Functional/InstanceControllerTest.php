@@ -407,21 +407,34 @@ final class InstanceControllerTest extends AdminTestCase
         yield 'too long' => [str_repeat('a', 30).'--'.str_repeat('b', 33)];
     }
 
-    public function testTheMailpitLoginIsShownToOperatorsAndNeverToAForeignMember(): void
+    public function testTheMailLinkOnlyShowsWhenTheTemplateHasMailpit(): void
     {
         $this->seed('acme', [InstanceState::Running]);
         $password = self::getContainer()->get(InstanceIsolation::class)->mailpitCredentials('acme--i1')['password'];
 
+        // the template is off by default: no link; the Mailpit password is never printed any more (Caddy supplies it)
         $this->as('admin');
-        $this->open('/instances/acme--i1');
+        $crawler = $this->open('/instances/acme--i1');
         self::assertResponseStatusCodeSame(200);
-        self::assertStringContainsString($password, $this->body());
+        self::assertCount(0, $crawler->filter('[data-testid=instance-mail]'));
+        self::assertStringNotContainsString($password, $this->body());
 
-        // the stand-in member belongs to demo only: no page, and the password is nowhere in the answer
+        $em = $this->em();
+        $project = new ProjectRepository($em)->findByName('acme');
+        self::assertNotNull($project);
+        $template = new TemplateRepository($em)->find($project, 'full');
+        self::assertNotNull($template);
+        $template->changeMailpit(true);
+        $em->flush();
+
+        $crawler = $this->open('/instances/acme--i1');
+        self::assertSame('https://mailpit--acme--i1.fleet.example.com', $crawler->filter('[data-testid=mailpit-link]')->attr('href'));
+        self::assertStringNotContainsString($password, $this->body());
+
+        // the stand-in member belongs to demo only: no page, so no link
         $this->as('member');
         $this->open('/instances/acme--i1');
         self::assertResponseStatusCodeSame(404);
-        self::assertStringNotContainsString($password, $this->body());
     }
 
     public function testDetailPageShowsTheInstance(): void

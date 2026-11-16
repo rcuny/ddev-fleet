@@ -37,6 +37,7 @@ final class TemplateOptions
             ->addOption('ssh-key', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Name of an extra SSH key (the file ssh/<name>_ed25519 in the fleet home) loaded into the instance\'s ssh-agent; the project needs container_ssh (repeat for several; replaces the old list)')
             ->addOption('ssh-identities', null, InputOption::VALUE_REQUIRED, 'Which keys the instance\'s ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key)')
             ->addOption('database', null, InputOption::VALUE_REQUIRED, 'Whether instances have a database of their own: yes (default) or no (Fleet exports FLEET_HAS_DB=0 and a poisoned DB_HOST)')
+            ->addOption('mailpit', null, InputOption::VALUE_REQUIRED, 'Whether the instance\'s Mailpit is reachable at mailpit--INSTANCE.DOMAIN, behind the instance\'s sign-in: yes or no (default)')
             ->addOption('agent', null, InputOption::VALUE_REQUIRED, 'Whether an AI agent works in the instances: yes or no (default). The UI warns and FLEET_AGENT=1 is exported')
             ->addOption('cpu-threads', null, InputOption::VALUE_REQUIRED, 'CPU threads all instances of the template may use together, at most the project\'s: a number, or none to inherit the project\'s')
             ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs of the template, at most the project\'s slots: a number, or none for unlimited')
@@ -90,7 +91,7 @@ final class TemplateOptions
                 $changes['sshIdentities'] = $parsed;
             }
         }
-        foreach (['database' => 'database', 'agent' => 'agent'] as $option => $property) {
+        foreach (['database' => 'database', 'agent' => 'agent', 'mailpit' => 'mailpit'] as $option => $property) {
             if (null === $given = $input->getOption($option)) {
                 continue;
             }

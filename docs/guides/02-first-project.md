@@ -36,6 +36,8 @@ Names (project, template, port) are **immutable**: an instance id is `<project>-
 
 6. **Watch and open.** The job page streams the log as it runs. When the instance is `running`, open `https://website--main.fleet.example.com`. Success: you sign in at the portal and see the site.
 
+   **Read the mail your site sends.** Every instance runs DDEV's Mailpit, which catches outgoing mail instead of delivering it. To open it from the browser, tick **Mailpit** on the template (`fleet template:update website web --mailpit=yes`), then redeploy or refresh the host. The instance page gets an **Open Mailpit** link to `https://mailpit--website--main.fleet.example.com`. You sign in once, with your Fleet account: nobody who cannot see the instance can open its Mailpit.
+
 7. **Let alice in.** Grant her the project (**Access** tab, or `fleet user:grant alice website`). It applies at once. Roles: [share and access](06-share-and-access.md).
 
 ## If something goes wrong
