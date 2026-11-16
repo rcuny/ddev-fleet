@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-11-16
+
+### Added
+- Add ARCHITECTURE.html, a 10-minute tour of how Fleet works, linked from the README.
+
 ## [1.12.0] - 2026-11-13
 
 ### Added
@@ -1595,7 +1600,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/rcuny/ddev-fleet/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/rcuny/ddev-fleet/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/rcuny/ddev-fleet/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/rcuny/ddev-fleet/compare/v1.9.2...v1.10.0

@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How Fleet works</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Zinc palette, Inter, cards, small uppercase section labels), written as plain CSS so the
+       page needs no external script. Dark mode: the `dark` class on <html>, storage key fleet-docs-theme. */
+    :root {
+      --bg: #fafafa; --bg-header: rgba(250, 250, 250, .8); --card: #ffffff; --chip: #f4f4f5;
+      --fg: #18181b; --fg2: #3f3f46; --muted: #52525b; --dim: #71717a;
+      --line: #e4e4e7; --line-soft: #f4f4f5; --dline: #a1a1aa; --band: #f4f4f5;
+      --note-bg: #fffbeb; --note-line: #fde68a; --note-fg: #78350f;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    html.dark {
+      --bg: #09090b; --bg-header: rgba(9, 9, 11, .8); --card: #18181b; --chip: #27272a;
+      --fg: #f4f4f5; --fg2: #d4d4d8; --muted: #a1a1aa; --dim: #a1a1aa;
+      --line: #27272a; --line-soft: #27272a; --dline: #52525b; --band: #101012;
+      --note-bg: rgba(69, 26, 3, .3); --note-line: rgba(120, 53, 15, .6); --note-fg: #fde68a;
+      color-scheme: dark;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { font-family: 'Inter', system-ui, -apple-system, sans-serif; -webkit-text-size-adjust: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font-feature-settings: "cv11", "ss01"; overflow-wrap: anywhere;
+           -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; line-height: 1.5; }
+    h1, h2, h3, p, ul, ol { margin: 0; }
+    a { color: inherit; text-decoration: underline; text-decoration-color: var(--dline); text-underline-offset: 3px; }
+    a:hover { text-decoration-color: currentColor; }
+
+    header.sticky { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+                    background: var(--bg-header); border-bottom: 1px solid var(--line); }
+    .bar, main { max-width: 56rem; margin: 0 auto; padding-left: 1rem; padding-right: 1rem; }
+    .bar { padding-top: .75rem; padding-bottom: .75rem; display: flex; align-items: center; justify-content: space-between; }
+    .bar span { font-size: .875rem; font-weight: 500; color: var(--dim); }
+    #theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem;
+                    border-radius: .375rem; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+    #theme-toggle:hover { background: var(--chip); }
+    #theme-toggle .i-sun { display: none; }
+    html.dark #theme-toggle .i-sun { display: inline-block; }
+    html.dark #theme-toggle .i-moon { display: none; }
+    main { padding-top: 2.5rem; padding-bottom: 2.5rem; }
+    main > * + * { margin-top: 3.5rem; }
+    @media (min-width: 640px) {
+      .bar, main { padding-left: 1.5rem; padding-right: 1.5rem; }
+      main { padding-top: 3.5rem; padding-bottom: 3.5rem; }
+    }
+
+    .icon { width: 1rem; height: 1rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2;
+            stroke-linecap: round; stroke-linejoin: round; }
+    .icon-sm { width: .875rem; height: .875rem; }
+
+    .note { border-radius: .5rem; border: 1px solid var(--note-line); background: var(--note-bg); color: var(--note-fg);
+            padding: 1rem; font-size: .875rem; }
+    h1 { font-size: 2.25rem; line-height: 1.1; font-weight: 700; letter-spacing: -.025em; }
+    @media (min-width: 640px) { h1 { font-size: 3rem; } }
+    .sub { margin-top: .75rem; font-size: 1rem; font-weight: 500; color: var(--dim); }
+    .meta { margin-top: .25rem; font-size: .875rem; color: var(--dim); }
+    .lead { margin-top: 1.5rem; font-size: 1.125rem; line-height: 1.625; color: var(--muted); }
+    @media (min-width: 640px) { .sub { font-size: 1.125rem; } .lead { font-size: 1.25rem; } }
+    .pills { margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+    .pill { display: inline-flex; align-items: center; padding: .25rem .625rem; border-radius: 9999px; background: var(--card);
+            border: 1px solid var(--line); font-size: .75rem; font-weight: 500; color: var(--fg2); }
+
+    h2 { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .18em; color: var(--dim);
+         display: flex; align-items: center; gap: .5rem; scroll-margin-top: 4.5rem; }
+    h2 code { text-transform: none; letter-spacing: normal; }
+    section > p { margin-top: 1rem; font-size: 1rem; line-height: 1.625; color: var(--muted); }
+    section > h2 + p { margin-top: 1.25rem; }
+    section > p strong, li strong { font-weight: 600; color: var(--fg); }
+    .label { margin-top: 2rem; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; color: var(--dim); }
+    code { font-family: var(--mono); font-size: .85em; padding: .125rem .25rem; border-radius: .25rem; background: var(--chip); color: var(--fg2); }
+    .note code { background: transparent; padding: 0; color: inherit; }
+
+    .card { border-radius: .5rem; border: 1px solid var(--line); background: var(--card); padding: 1.25rem; margin-top: 1.25rem; }
+    .card h3 { font-size: 1rem; font-weight: 600; color: var(--fg); display: flex; align-items: center; gap: .5rem; }
+    .card h3 .icon { color: var(--dim); }
+    .card > p { margin-top: .5rem; font-size: .875rem; line-height: 1.625; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: 1fr; gap: .75rem; margin-top: 1.25rem; }
+    .grid .card { margin-top: 0; }
+    @media (min-width: 640px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+    .tbl-wrap { overflow-x: auto; margin-top: 1rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .14em; color: var(--dim);
+         padding: 0 1rem .5rem 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    td { padding: .5rem 1rem .5rem 0; vertical-align: top; color: var(--muted); line-height: 1.625; border-top: 1px solid var(--line-soft); }
+    tr:first-child td { border-top: 0; }
+    td:last-child, th:last-child { padding-right: 0; }
+    td.k { font-family: var(--mono); font-size: .75rem; font-weight: 500; color: var(--fg2); min-width: 9rem; padding-top: .65rem; }
+    td.kw { font-weight: 500; color: var(--fg); min-width: 8rem; }
+    td code { white-space: normal; }
+
+    ol.steps, ul.plain { margin-top: 1rem; padding-left: 1.25rem; font-size: .9375rem; line-height: 1.625; color: var(--muted); }
+    ol.steps li + li, ul.plain li + li { margin-top: .375rem; }
+    ol.steps li::marker { color: var(--dim); font-weight: 600; }
+
+    nav.toc { margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+    nav.toc a { text-decoration: none; }
+    nav.toc a:hover { background: var(--chip); }
+
+    figure { margin: 1.25rem 0 0; }
+    .diagram { border-radius: .5rem; border: 1px solid var(--line); background: var(--card); padding: 1rem; overflow-x: auto; }
+    .diagram svg { display: block; width: 100%; min-width: 680px; height: auto; font-family: 'Inter', system-ui, sans-serif; }
+    figcaption { margin-top: .625rem; font-size: .8125rem; line-height: 1.5; color: var(--dim); }
+    .d-box { fill: var(--card); stroke: var(--dline); stroke-width: 1.25; }
+    .d-edge { fill: var(--chip); stroke: var(--fg); stroke-width: 1.5; }
+    .d-band { fill: var(--band); stroke: var(--dline); stroke-width: 1.25; stroke-dasharray: 5 4; }
+    .d-t { font-size: 13px; font-weight: 600; fill: var(--fg); }
+    .d-s { font-size: 11px; fill: var(--muted); }
+    .d-m { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+    .d-l { font-size: 10.5px; font-weight: 500; fill: var(--dim); }
+    .d-line { fill: none; stroke: var(--dim); stroke-width: 1.5; }
+    .d-dash { stroke-dasharray: 4 3; }
+    .d-head { fill: var(--dim); }
+    .d-num { fill: var(--fg); }
+    .d-numt { font-size: 11px; font-weight: 700; fill: var(--bg); }
+
+    footer { padding-top: 2rem; border-top: 1px solid var(--line); font-size: .75rem; color: var(--dim); }
+    footer code { background: transparent; padding: 0; color: inherit; }
+
+    @media print {
+      html { background: white !important; color: black !important; color-scheme: light; }
+      html.dark { color-scheme: light; }
+      html.dark body, html.dark * { background: white !important; color: black !important; border-color: #d4d4d8 !important; }
+      .no-print { display: none !important; }
+      .print-card { break-inside: avoid; page-break-inside: avoid; }
+      header.sticky { position: static !important; backdrop-filter: none !important; }
+      main { padding-top: 0 !important; }
+      a { color: black !important; text-decoration: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></symbol>
+      <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+      <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1-2-1.5Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="sticky">
+    <div class="bar">
+      <span>How it works · ddev-fleet</span>
+      <button id="theme-toggle" class="no-print" aria-label="Toggle theme">
+        <svg class="icon i-sun"><use href="#i-sun"/></svg>
+        <svg class="icon i-moon"><use href="#i-moon"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ABOUT THIS PAGE -->
+    <div class="note">
+      <p><strong>About this page:</strong> a technical tour of Fleet 1.x for developers joining the project, written from the code on the product's <code>develop</code> branch (the latest <code>v1.*</code> tag is listed in <code>CHANGELOG.md</code>). Product scope is in <a href="README.md">README.md</a> and <a href="docs/concepts.md">docs/concepts.md</a>; this page covers how the thing is built. When it and the code disagree, the code wins. The product's own docs are in <a href="docs/README.md">docs/</a>.</p>
+    </div>
+
+    <!-- HERO -->
+    <section>
+      <h1>How Fleet works</h1>
+      <p class="sub">The technical big picture of ddev-fleet 1.x, in about ten minutes</p>
+      <p class="meta">Last updated 2026-11-16 · Product repo root (Symfony app in <code>app/</code>)</p>
+      <p class="lead">Fleet runs many DDEV projects side by side on one Linux server. You register git repositories as projects, describe recipes as templates, and Fleet clones, configures, starts and removes instances. Each instance is a full DDEV project at <code>https://&lt;project&gt;--&lt;label&gt;.&lt;domain&gt;</code>, behind a login.</p>
+      <p style="margin-top:1rem">The core idea: <strong>Fleet itself is not a container.</strong> It is a Symfony application installed natively on a bare-metal (or VM) Debian host, supervised by systemd, and it drives DDEV and Docker from the outside. If an instance or Docker itself misbehaves, the manager is still standing and can repair it. Each host is independent; there is no central control plane. What Fleet is for and who uses it is in <a href="README.md">README.md</a> and <a href="docs/concepts.md">docs/concepts.md</a>.</p>
+      <p style="margin-top:1rem">An earlier Python 0.x line (FastAPI, a <code>fleet.yml</code> registry) is frozen on the <code>legacy</code> branch. Nothing below describes it.</p>
+      <nav class="toc no-print" aria-label="Sections">
+        <a class="pill" href="#runtime">Runtime</a><a class="pill" href="#stack">Stack</a><a class="pill" href="#model">Domain model</a><a class="pill" href="#jobs">Jobs and workers</a><a class="pill" href="#ui">Web UI</a><a class="pill" href="#cli">CLI and API</a><a class="pill" href="#schedules">Scheduling</a><a class="pill" href="#hooks">Webhooks and hooks</a><a class="pill" href="#install">Install and CI</a><a class="pill" href="#map">Code map</a><a class="pill" href="#glossary">Glossary</a>
+      </nav>
+    </section>
+
+    <!-- RUNTIME -->
+    <section>
+      <h2 id="runtime"><svg class="icon icon-sm"><use href="#i-server"/></svg>Runtime architecture on a host</h2>
+      <p>A Fleet host runs a handful of systemd services and one Docker daemon. Only Caddy listens on the Internet. Everything else is bound to loopback or a Unix socket.</p>
+
+      <figure>
+        <div class="diagram print-card">
+          <svg viewBox="0 0 760 512" role="img" aria-labelledby="arch-title arch-desc">
+            <title id="arch-title">Runtime architecture of a Fleet host</title>
+            <desc id="arch-desc">Caddy is the only public process. It asks Authelia to authenticate, serves the Symfony app through php-fpm, proxies the Mercure hub and forwards instance hostnames to the DDEV router. The app and the systemd workers share FLEET_HOME with its two SQLite databases. The worker runs ddev and git against Docker, where each instance is a DDEV project.</desc>
+            <defs><marker id="a1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" class="d-head"/></marker></defs>
+
+            <text x="380" y="16" text-anchor="middle" class="d-l">Internet · :80 / :443 (+ named ports)</text>
+            <path d="M380 22V44" class="d-line" marker-end="url(#a1)"/>
+
+            <rect x="20" y="46" width="720" height="54" rx="8" class="d-edge"/>
+            <text x="380" y="69" text-anchor="middle" class="d-t">Caddy</text>
+            <text x="380" y="87" text-anchor="middle" class="d-s">the only public process · TLS for every hostname · sign-in gate · reverse proxy</text>
+
+            <path d="M100 100V138" class="d-line" marker-end="url(#a1)"/>
+            <text x="107" y="124" class="d-l">forward_auth</text>
+            <path d="M325 100V138" class="d-line" marker-end="url(#a1)"/>
+            <text x="332" y="124" class="d-l">FastCGI</text>
+            <path d="M540 100V138" class="d-line" marker-end="url(#a1)"/>
+            <text x="547" y="124" class="d-l">SSE</text>
+
+            <rect x="20" y="140" width="160" height="66" rx="8" class="d-box"/>
+            <text x="34" y="162" class="d-t">Authelia</text>
+            <text x="34" y="179" class="d-m">127.0.0.1:9091</text>
+            <text x="34" y="194" class="d-s">auth.&lt;domain&gt; login</text>
+
+            <rect x="195" y="140" width="260" height="66" rx="8" class="d-box"/>
+            <text x="209" y="162" class="d-t">php-fpm · Symfony app</text>
+            <text x="209" y="179" class="d-m">/run/php/fleet.sock</text>
+            <text x="209" y="194" class="d-s">UI · /api/v1 · /hooks · queues jobs</text>
+
+            <rect x="470" y="140" width="140" height="66" rx="8" class="d-box"/>
+            <text x="484" y="162" class="d-t">Mercure hub</text>
+            <text x="484" y="179" class="d-m">127.0.0.1:3000</text>
+            <text x="484" y="194" class="d-s">live wake-ups</text>
+
+            <path d="M716 100V436" class="d-line" marker-end="url(#a1)"/>
+            <text x="709" y="176" text-anchor="end" class="d-l">*.&lt;domain&gt;</text>
+            <text x="709" y="396" text-anchor="end" class="d-l">plain HTTP · 127.0.0.1:8080</text>
+
+            <path d="M250 206V244" class="d-line" marker-end="url(#a1)"/>
+            <text x="257" y="230" class="d-l">Doctrine</text>
+
+            <rect x="20" y="246" width="290" height="120" rx="8" class="d-box"/>
+            <text x="34" y="268" class="d-t">FLEET_HOME · /srv/fleet</text>
+            <text x="34" y="289" class="d-m">var/fleet.sqlite   state, source of truth</text>
+            <text x="34" y="306" class="d-m">var/queue.sqlite   Messenger queue</text>
+            <text x="34" y="323" class="d-m">logs/  locks/  slots/  backups/</text>
+            <text x="34" y="340" class="d-m">assets/  instances/  keys/  ssh/</text>
+            <text x="34" y="357" class="d-s">one directory, owned by the fleet user</text>
+
+            <rect x="350" y="246" width="168" height="54" rx="8" class="d-box"/>
+            <text x="362" y="268" class="d-t">fleet-scheduler</text>
+            <text x="362" y="285" class="d-s">ticks every 30 s</text>
+            <rect x="527" y="246" width="168" height="54" rx="8" class="d-box"/>
+            <text x="539" y="268" class="d-t">fleet-status</text>
+            <text x="539" y="285" class="d-s">watches every 10 s</text>
+            <rect x="350" y="312" width="168" height="54" rx="8" class="d-box"/>
+            <text x="362" y="334" class="d-t">fleet-worker@1</text>
+            <text x="362" y="351" class="d-m">messenger:consume jobs</text>
+            <rect x="527" y="312" width="168" height="54" rx="8" class="d-box"/>
+            <text x="539" y="334" class="d-t">fleet-tmux</text>
+            <text x="539" y="351" class="d-s">one window per instance</text>
+
+            <path d="M348 339H313" class="d-line" marker-end="url(#a1)" marker-start="url(#a1)"/>
+            <path d="M434 366V408" class="d-line" marker-end="url(#a1)"/>
+            <text x="441" y="392" class="d-l">ddev · git</text>
+
+            <rect x="20" y="410" width="720" height="92" rx="8" class="d-band"/>
+            <text x="34" y="428" class="d-l">Docker · one DDEV project per instance · containers sit under fleet.slice</text>
+            <rect x="36" y="438" width="150" height="50" rx="8" class="d-box"/>
+            <text x="48" y="459" class="d-t">myproject--main</text>
+            <text x="48" y="476" class="d-s">web · db · add-ons</text>
+            <rect x="198" y="438" width="150" height="50" rx="8" class="d-box"/>
+            <text x="210" y="459" class="d-t">myproject--fix-12</text>
+            <text x="210" y="476" class="d-s">web · db · add-ons</text>
+            <rect x="360" y="438" width="150" height="50" rx="8" class="d-box"/>
+            <text x="372" y="459" class="d-t">other--main</text>
+            <text x="372" y="476" class="d-s">web · db · add-ons</text>
+            <path d="M538 463H513" class="d-line" marker-end="url(#a1)"/>
+            <rect x="540" y="438" width="188" height="50" rx="8" class="d-box"/>
+            <text x="552" y="459" class="d-t">ddev-router (Traefik)</text>
+            <text x="552" y="476" class="d-s">routes by Host header, no TLS</text>
+          </svg>
+        </div>
+        <figcaption>Solid boxes are host processes (systemd units); the dashed band is Docker. The web request never runs <code>ddev</code> or <code>git</code>: it writes rows and queues a job, and the worker does the work.</figcaption>
+      </figure>
+
+      <p class="label">The processes</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Unit</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td class="k">caddy</td><td>Terminates TLS (one certificate per hostname with HTTP-01, or one wildcard with OVH DNS-01), strips any inbound <code>Remote-*</code> header, asks Authelia, then serves the app or proxies to an instance. Its configuration is generated by Fleet.</td></tr>
+            <tr><td class="k">authelia</td><td>The login portal at <code>auth.&lt;domain&gt;</code>. Fleet writes its user file from the database.</td></tr>
+            <tr><td class="k">php8.4-fpm</td><td>One pool, <code>fleet</code>, running the Symfony app: the UI, the token API, the webhook receiver.</td></tr>
+            <tr><td class="k">fleet-worker@1</td><td>The single Messenger consumer of the <code>jobs</code> transport. Exactly one: the SQLite queue takes one consumer.</td></tr>
+            <tr><td class="k">fleet-scheduler</td><td>Consumes the Symfony Scheduler transport <code>scheduler_default</code>: a tick every 30 seconds that fires due schedules.</td></tr>
+            <tr><td class="k">fleet-status</td><td><code>fleet:instance:watch</code>: keeps instance states true to the host (<code>ddev list</code>, <code>docker stats</code>), reaps dead jobs, prunes old ones, samples slice CPU use.</td></tr>
+            <tr><td class="k">fleet-mercure</td><td>The Mercure hub on loopback, published by Caddy at <code>/.well-known/mercure</code>.</td></tr>
+            <tr><td class="k">fleet-tmux</td><td>Owns the persistent <code>fleet</code> tmux session: one window per instance.</td></tr>
+            <tr><td class="k">fleet-isolation-watch</td><td>Listens to Docker events and re-applies the network isolation rules between instances.</td></tr>
+            <tr><td class="k">fleet-boot</td><td>Oneshot after a reboot: starts the instances one at a time.</td></tr>
+            <tr><td class="k">timers</td><td><code>fleet-backup</code> (daily database backup), <code>fleet-tls-check</code> (every 10 minutes), <code>fleet-upgrade-check</code> (daily).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="label">SQLite is the source of truth</p>
+      <p>There is no registry file. Projects, templates, instances, users, jobs, webhooks, schedules and host settings are Doctrine entities in <code>var/fleet.sqlite</code>. The Messenger queue lives in a second file, <code>var/queue.sqlite</code>, on its own DBAL connection, so queue traffic never blocks the application database. Everything else the app persists is a file under <code>FLEET_HOME</code>, and <code>App\Fleet\FleetPaths</code> is the only class that knows the layout.</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Path under <code>/srv/fleet</code></th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td class="k">var/</td><td>The two SQLite databases.</td></tr>
+            <tr><td class="k">instances/&lt;id&gt;/</td><td>One git checkout per instance, a complete DDEV project.</td></tr>
+            <tr><td class="k">assets/&lt;project&gt;/</td><td>Files seeded into each new instance (database dumps, <code>.env</code>, settings).</td></tr>
+            <tr><td class="k">logs/</td><td>One append-only log file per job.</td></tr>
+            <tr><td class="k">locks/, slots/</td><td><code>flock</code> files: the per-instance job lock, and the capacity slots.</td></tr>
+            <tr><td class="k">keys/, ssh/</td><td>The key that encrypts stored secrets; the deploy and push SSH keys.</td></tr>
+            <tr><td class="k">backups/, staging/, uploads/</td><td>Database backups; rendered config waiting for the root helper; upload chunks.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The app runs as the unprivileged <code>fleet</code> user. When it must change root-owned configuration (the Caddy and Authelia files, the systemd slices), it renders the file from a Twig template in <code>app/templates/system/</code>, stages it, and calls one root helper, <code>/usr/local/libexec/fleet/apply</code>, through a single sudoers line. Generated files are always rebuilt from the database, never edited by hand.</p>
+
+      <p class="label">The request path to an instance</p>
+      <figure>
+        <div class="diagram print-card">
+          <svg viewBox="0 0 760 200" role="img" aria-labelledby="req-title req-desc">
+            <title id="req-title">Request path from the browser to an instance</title>
+            <desc id="req-desc">The browser reaches Caddy over HTTPS. Caddy sends a sub-request to Authelia, then forwards the request over plain HTTP to the DDEV router on loopback, which picks the instance by its Host header.</desc>
+            <defs><marker id="a2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" class="d-head"/></marker></defs>
+
+            <rect x="20" y="24" width="150" height="66" rx="8" class="d-box"/>
+            <text x="34" y="48" class="d-t">Browser</text>
+            <text x="34" y="65" class="d-s">https://myproject--main</text>
+            <text x="34" y="79" class="d-s">.&lt;domain&gt;</text>
+
+            <rect x="210" y="24" width="150" height="66" rx="8" class="d-edge"/>
+            <text x="224" y="48" class="d-t">Caddy :443</text>
+            <text x="224" y="65" class="d-s">TLS, instance site block,</text>
+            <text x="224" y="79" class="d-s">group check</text>
+
+            <rect x="400" y="24" width="150" height="66" rx="8" class="d-box"/>
+            <text x="414" y="48" class="d-t">ddev-router</text>
+            <text x="414" y="65" class="d-m">127.0.0.1:8080</text>
+            <text x="414" y="79" class="d-s">routes by Host</text>
+
+            <rect x="590" y="24" width="150" height="66" rx="8" class="d-box"/>
+            <text x="604" y="48" class="d-t">Instance</text>
+            <text x="604" y="65" class="d-s">web container of</text>
+            <text x="604" y="79" class="d-s">myproject--main</text>
+
+            <rect x="210" y="134" width="150" height="52" rx="8" class="d-box"/>
+            <text x="224" y="157" class="d-t">Authelia</text>
+            <text x="224" y="174" class="d-s">session cookie → groups</text>
+
+            <path d="M172 57H207" class="d-line" marker-end="url(#a2)"/>
+            <path d="M285 92V131" class="d-line" marker-end="url(#a2)" marker-start="url(#a2)"/>
+            <path d="M362 57H397" class="d-line" marker-end="url(#a2)"/>
+            <path d="M552 57H587" class="d-line" marker-end="url(#a2)"/>
+
+            <circle cx="190" cy="40" r="9" class="d-num"/><text x="190" y="44" text-anchor="middle" class="d-numt">1</text>
+            <circle cx="305" cy="112" r="9" class="d-num"/><text x="305" y="116" text-anchor="middle" class="d-numt">2</text>
+            <circle cx="380" cy="40" r="9" class="d-num"/><text x="380" y="44" text-anchor="middle" class="d-numt">3</text>
+            <circle cx="570" cy="40" r="9" class="d-num"/><text x="570" y="44" text-anchor="middle" class="d-numt">4</text>
+          </svg>
+        </div>
+      </figure>
+      <ol class="steps">
+        <li><strong>TLS at Caddy.</strong> The instance hostname matches a site block that Fleet wrote when the instance was deployed. The block exists before the DDEV project starts, so a site is never reachable without its gate.</li>
+        <li><strong>Authentication.</strong> Caddy's <code>forward_auth</code> asks Authelia. No session means a redirect to <code>auth.&lt;domain&gt;</code>. With one, Authelia returns the user's groups; the site block answers 403 unless they match the instance's project.</li>
+        <li><strong>Plain HTTP on loopback.</strong> Caddy proxies to DDEV's shared router, which does no TLS here.</li>
+        <li><strong>Host routing.</strong> The router picks the instance's web container by the <code>Host</code> header.</li>
+      </ol>
+      <p>Requests for the Fleet UI itself take the same first two steps, then go to php-fpm. The app keeps no login session: it trusts the <code>Remote-User</code> and <code>Remote-Groups</code> headers Authelia set, and only when the request proves it came through the local Caddy (a shared secret passed as a FastCGI parameter; see <code>App\Security\RemoteUserAuthenticator</code>). Three paths skip the gate and authenticate themselves: <code>/health</code>, <code>/hooks/*</code> (HMAC signature) and <code>/api/v1/*</code> (bearer token).</p>
+    </section>
+
+    <!-- STACK -->
+    <section>
+      <h2 id="stack"><svg class="icon icon-sm"><use href="#i-layers"/></svg>The stack</h2>
+      <div class="tbl-wrap" style="margin-top:1.25rem">
+        <table>
+          <tbody>
+            <tr><td class="kw">Language, framework</td><td>PHP 8.4, Symfony 8.1 (<code>app/</code>). Strict types everywhere; PHPStan level 8 and PHP-CS-Fixer are merge gates.</td></tr>
+            <tr><td class="kw">Persistence</td><td>Doctrine ORM 3 on SQLite, attribute mapping in <code>src/Domain</code>, schema changes only through migrations in <code>app/migrations/</code>.</td></tr>
+            <tr><td class="kw">Background work</td><td>Symfony Messenger (Doctrine transport), Symfony Scheduler for the tick, Symfony Lock with the <code>flock</code> store, Symfony Process for host commands.</td></tr>
+            <tr><td class="kw">Templates</td><td>Twig, with Twig Components for the UI primitives and one Live Component.</td></tr>
+            <tr><td class="kw">Front-end</td><td>Symfony UX: Turbo 8, Stimulus 3, UX Icons (Lucide), and the UX Toolkit shadcn kit as the source of the component recipes.</td></tr>
+            <tr><td class="kw">CSS and assets</td><td>Tailwind v4 through <code>symfonycasts/tailwind-bundle</code> (a standalone binary) and AssetMapper with an import map. No Node, no bundler, no JavaScript build step.</td></tr>
+            <tr><td class="kw">Live updates</td><td>Mercure (Server-Sent Events) through <code>symfony/mercure-bundle</code>.</td></tr>
+            <tr><td class="kw">Around the app</td><td>Caddy, Authelia, DDEV, Docker, systemd, tmux. Ansible for the installer.</td></tr>
+            <tr><td class="kw">Tests</td><td>PHPUnit (<code>app/tests</code>: Unit, Integration, Functional, Repo), Playwright in TypeScript (<code>tests/playwright</code>, desktop and phone, with accessibility checks), pytest for the CI tooling (<code>tests/pytest</code>).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- DOMAIN MODEL -->
+    <section>
+      <h2 id="model"><svg class="icon icon-sm"><use href="#i-db"/></svg>Domain model</h2>
+      <p>Entities and their repositories live in <code>app/src/Domain/&lt;Area&gt;/</code>. This is how the pieces relate.</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Concept</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td class="kw">Project</td><td>A git remote plus defaults: default branch and template, an issue-id pattern, named ports, members, a CPU allotment and slots. Its name is permanent because it is part of every instance id.</td></tr>
+            <tr><td class="kw">Template</td><td>A named recipe inside a project: post-deploy commands, the <code>tty1</code> and <code>tty2</code> terminal commands, a Drupal environment, whether it has a database, and an optional allotment and slots of its own.</td></tr>
+            <tr><td class="kw">Instance</td><td>One deployed checkout. Id <code>&lt;project&gt;--&lt;label&gt;</code> (the label usually comes from the branch or ticket), which is also the DDEV project name and the hostname prefix. States: <code>deploying</code>, <code>running</code>, <code>stopped</code>, <code>failed</code>, <code>destroying</code>, <code>unknown</code>.</td></tr>
+            <tr><td class="kw">Job</td><td>One queued action on an instance, with a type, a trigger (<code>ui</code>, <code>cli</code>, <code>api</code>, <code>webhook</code>, <code>schedule</code>), a requester and a status.</td></tr>
+            <tr><td class="kw">Assets and secrets</td><td>Assets are per-project files copied into every new checkout. Secrets are stored encrypted and referenced as <code>[[token]]</code> placeholders in asset files and commands; they are masked in job logs.</td></tr>
+            <tr><td class="kw">Users</td><td>Administrators, project members and site-only users. Fleet stores them, renders Authelia's user file from them, and Caddy enforces instance access by group.</td></tr>
+            <tr><td class="kw">Host settings</td><td>One row for the host: domain, TLS mode, job concurrency, CPU reserve, instance cap, retention values.</td></tr>
+            <tr><td class="kw">Webhooks, schedules</td><td>Endpoints with rules and a delivery log; schedules with a run history. Both only ever queue ordinary jobs.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="label">Capacity</p>
+      <p>Capacity protects the host from one noisy project. Three numbers, all stored per host:</p>
+      <ul class="plain">
+        <li><strong>Allotment:</strong> CPU threads shared by all instances of a project or template. It is a ceiling, enforced by a systemd slice (<code>fleet.slice</code> &gt; <code>fleet-&lt;project&gt;.slice</code> &gt; <code>fleet-&lt;project&gt;-&lt;template&gt;.slice</code>). At deploy, Fleet writes a compose override that puts every container of the instance under its slice.</li>
+        <li><strong>Slots:</strong> how many heavy runs (a CI suite, a working agent) may overlap in a template or project. Slots are advisory: scripts inside the instance take one by holding an <code>flock</code> in the directory Fleet exposes as <code>FLEET_SLOT_DIR</code>.</li>
+        <li><strong>Instance cap and reserve:</strong> a host-wide limit on instances (default 25) and the threads kept back for the OS and Fleet itself (default 2).</li>
+      </ul>
+      <p><code>fleet host:capacity</code> and the Capacity tab of the host settings report all of it. There is no memory, disk or per-instance CPU limit.</p>
+    </section>
+
+    <!-- JOBS -->
+    <section>
+      <h2 id="jobs"><svg class="icon icon-sm"><use href="#i-activity"/></svg>Jobs, the queue and the worker</h2>
+      <p>Every action that touches the host (deploy, redeploy, start, stop, restart, destroy) is a job. This is the part of the code worth understanding first.</p>
+
+      <figure>
+        <div class="diagram print-card">
+          <svg viewBox="0 0 760 236" role="img" aria-labelledby="job-title job-desc">
+            <title id="job-title">Lifecycle of a job</title>
+            <desc id="job-desc">A trigger calls InstanceService, which stores a queued job and dispatches a RunJob message to the jobs transport. The worker consumes it and either re-queues it when the instance or all job slots are busy, or runs it, in a child process when concurrency is above one. The executor locks the instance, runs the job and writes a log file; Mercure tells the browser that the log grew.</desc>
+            <defs><marker id="a3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" class="d-head"/></marker></defs>
+
+            <path d="M520 46C500 22 412 22 392 44" class="d-line d-dash" marker-end="url(#a3)"/>
+            <text x="456" y="18" text-anchor="middle" class="d-l">busy: back on the queue with a delay</text>
+
+            <rect x="6" y="48" width="132" height="70" rx="8" class="d-box"/>
+            <text x="18" y="70" class="d-t">Trigger</text>
+            <text x="18" y="87" class="d-s">UI · CLI · API</text>
+            <text x="18" y="102" class="d-s">webhook · schedule</text>
+
+            <rect x="160" y="48" width="132" height="70" rx="8" class="d-box"/>
+            <text x="172" y="70" class="d-t">InstanceService</text>
+            <text x="172" y="87" class="d-s">job row: queued</text>
+            <text x="172" y="102" class="d-s">dispatch RunJob(id)</text>
+
+            <rect x="314" y="48" width="132" height="70" rx="8" class="d-box"/>
+            <text x="326" y="70" class="d-t">jobs transport</text>
+            <text x="326" y="87" class="d-m">queue.sqlite</text>
+            <text x="326" y="102" class="d-s">one consumer</text>
+
+            <rect x="468" y="48" width="132" height="70" rx="8" class="d-box"/>
+            <text x="480" y="70" class="d-t">fleet-worker@1</text>
+            <text x="480" y="87" class="d-s">ConcurrentJobRunner</text>
+            <text x="480" y="102" class="d-s">free slot? same instance?</text>
+
+            <rect x="622" y="48" width="132" height="70" rx="8" class="d-edge"/>
+            <text x="634" y="70" class="d-t">JobExecutor</text>
+            <text x="634" y="87" class="d-s">lock, claim: running</text>
+            <text x="634" y="102" class="d-s">run type, final status</text>
+
+            <path d="M140 83H157" class="d-line" marker-end="url(#a3)"/>
+            <path d="M294 83H311" class="d-line" marker-end="url(#a3)"/>
+            <path d="M448 83H465" class="d-line" marker-end="url(#a3)"/>
+            <path d="M602 83H619" class="d-line" marker-end="url(#a3)"/>
+
+            <path d="M688 120V160" class="d-line" marker-end="url(#a3)"/>
+            <rect x="622" y="162" width="132" height="60" rx="8" class="d-box"/>
+            <text x="634" y="184" class="d-t">Job log file</text>
+            <text x="634" y="201" class="d-s">append-only, masked</text>
+
+            <path d="M620 192H603" class="d-line" marker-end="url(#a3)"/>
+            <rect x="468" y="162" width="132" height="60" rx="8" class="d-box"/>
+            <text x="480" y="184" class="d-t">Mercure</text>
+            <text x="480" y="201" class="d-s">"job 7 changed"</text>
+
+            <path d="M466 192H449" class="d-line" marker-end="url(#a3)"/>
+            <rect x="314" y="162" width="132" height="60" rx="8" class="d-box"/>
+            <text x="326" y="184" class="d-t">Browser job page</text>
+            <text x="326" y="201" class="d-m">GET /jobs/7/log</text>
+
+            <text x="6" y="184" class="d-l">Job status</text>
+            <text x="6" y="201" class="d-m">queued → running →</text>
+            <text x="6" y="216" class="d-m">succeeded | failed | interrupted</text>
+          </svg>
+        </div>
+        <figcaption>The message carries only the job id. The job row is the state, so a redelivered message that finds a job no longer <code>queued</code> does nothing.</figcaption>
+      </figure>
+
+      <p class="label">From request to message</p>
+      <p><code>App\Fleet\Instances\InstanceService</code> turns a request into instance rows and <code>Job</code> rows, written in one flush, and then <code>JobService::enqueue()</code> dispatches an <code>App\Message\RunJob</code> for each. The message is routed to the <code>jobs</code> transport (<code>config/packages/messenger.yaml</code>), a Doctrine transport on the queue database. In the <code>dev</code> and <code>test</code> environments that transport is <code>sync://</code>, so a click runs its job inside the request and no worker is needed.</p>
+
+      <p class="label">The worker</p>
+      <p><code>fleet-worker@1</code> runs <code>messenger:consume jobs</code>. <code>RunJobHandler</code> hands the id to <code>ConcurrentJobRunner</code>, which decides what to do without ever blocking on a job:</p>
+      <ul class="plain">
+        <li>With the default concurrency of 1, the job runs inside the worker process.</li>
+        <li>With a higher "max concurrent jobs" host setting, each job runs in a detached child process, <code>bin/console fleet:job:work</code>. Children outlive a worker restart or an upgrade, so jobs still marked <code>running</code> count as taken slots.</li>
+        <li>If all slots are taken, or another job is working on the same instance, the message goes back on the queue with a short delay and the job stays <code>queued</code>.</li>
+      </ul>
+      <p><code>JobExecutor</code> then takes the instance lock (a Symfony Lock on <code>instance.&lt;id&gt;</code>, stored as an <code>flock</code> under <code>FLEET_HOME/locks</code>), claims the job (<code>queued</code> to <code>running</code>), runs the matching <code>JobType</code> from <code>src/Fleet/Jobs/Type/</code>, and always records a final status. The lock is the real guarantee that two jobs of one instance never overlap.</p>
+
+      <p class="label">Failures and retries</p>
+      <div class="tbl-wrap">
+        <table>
+          <tbody>
+            <tr><td class="kw">No automatic retry</td><td>The transport has <code>max_retries: 0</code>. A deploy is not safe to repeat blindly, so a retry is a person's decision: the Retry button or <code>fleet job:retry</code> creates a new job linked to the failed one.</td></tr>
+            <tr><td class="kw">Waiting has a limit</td><td>A job that waits for a busy instance fails after 30 minutes ("Gave up waiting for the instance to be free").</td></tr>
+            <tr><td class="kw">Dead workers</td><td>There is no heartbeat. A <code>flock</code> dies with its process, so <code>JobReaper</code> (run by <code>fleet-status</code>) marks a <code>running</code> job whose lock is free as <code>interrupted</code>, and fails queued jobs that lost their message.</td></tr>
+            <tr><td class="kw">Sequential batches</td><td>A batch flagged sequential (starting every instance after a reboot) runs its jobs one after another.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="label">Running <code>ddev</code> and <code>git</code></p>
+      <p>Host commands go through one interface, <code>App\Fleet\Shell\CommandRunner</code>. The production implementation, <code>ProcessCommandRunner</code>, wraps Symfony Process: arguments are passed as an array and never through a shell, and the child gets a reduced environment without the app's secrets. In dev and test the <code>FLEET_RUNNER=recording</code> implementation runs nothing and replays scripted results, which is why the test suites need no Docker. <code>Ddev</code> and <code>GitClient</code> are thin wrappers on top.</p>
+      <p>A deploy is <code>DeployWorkflow</code>: validate everything that can be checked up front, clone the branch, write <code>.ddev/config.fleet.yaml</code> (the one file Fleet adds to the project's DDEV configuration), seed assets and resolve <code>[[token]]</code> placeholders, write the Caddy site and reload, <code>ddev start</code>, run the template's post-deploy lines (a failing line fails the deploy), then open the tmux window. Extra behaviour hooks in as tagged <code>DeployStep</code> services in three phases (before start, after start, after deploy).</p>
+
+      <p class="label">Live logs</p>
+      <p><code>JobLog</code> appends the output to a file, after passing it through a masker that hides registered secrets. Mercure is only a wake-up: <code>JobFeed</code> publishes "this job changed" with ids and sizes, never text. The Stimulus <code>job-log</code> controller then fetches <code>/jobs/&lt;id&gt;/log</code> from the last byte offset it has. If the hub is down the page polls every 2 seconds, and a job never fails because of Mercure.</p>
+    </section>
+
+    <!-- UI -->
+    <section>
+      <h2 id="ui"><svg class="icon icon-sm"><use href="#i-layout"/></svg>Web UI and front-end components</h2>
+      <p>The UI is server-rendered Twig. Turbo makes navigation and form posts feel instant; small Stimulus controllers add behaviour. There is no client-side application state.</p>
+      <div class="grid">
+        <div class="card print-card">
+          <h3><svg class="icon"><use href="#i-layout"/></svg>Page structure</h3>
+          <p><code>templates/base.html.twig</code> plus the shell partials in <code>templates/_shell/</code>: sidebar and top bar on desktop, a bottom bar and a "More" sheet on phones. Every menu is rendered from one list, <code>App\Ui\NavigationCatalog</code>. Every page must work at 390 px wide.</p>
+        </div>
+        <div class="card print-card">
+          <h3><svg class="icon"><use href="#i-folder"/></svg>Areas</h3>
+          <p>For members: Home, Instances (list, deploy form, detail) and the job page. Under <code>/admin</code>: Projects (with templates, assets, secrets), Jobs, Webhooks, Schedules, Secrets, API tokens, Users, Settings (<code>/admin/host</code>, tabbed), Upgrade and the design system. <code>/setup</code> is the first-run wizard.</p>
+        </div>
+        <div class="card print-card">
+          <h3><svg class="icon"><use href="#i-layers"/></svg>Components</h3>
+          <p><code>templates/components/</code> holds the shadcn-kit primitives as anonymous Twig components (<code>&lt;twig:Button&gt;</code>, <code>Card</code>, <code>Dialog</code>, <code>DropdownMenu</code>, <code>Sheet</code>, <code>Table</code> and so on). Components that need PHP have a class in <code>src/Twig/Components/</code> (<code>MainNav</code>, <code>HostHealthCard</code>, <code>TlsBanner</code>). <code>IssueIdPreview</code> is the one Live Component.</p>
+        </div>
+        <div class="card print-card">
+          <h3><svg class="icon"><use href="#i-book"/></svg>Design system</h3>
+          <p><code>/admin/design-system</code> previews the tokens and every primitive, one partial per section in <code>templates/admin/design_system/sections/</code>. Tokens and dark mode are defined in <code>assets/styles/app.css</code>. New UI uses these components; a missing one is added from the kit with <code>ux:install</code>.</p>
+        </div>
+      </div>
+      <p><strong>Real-time updates</strong> follow the same pattern as the job log. The instance list sits in a <code>&lt;turbo-frame&gt;</code>; the <code>instance-list</code> Stimulus controller reloads that frame when Mercure says an instance changed, or every 5 seconds as a fallback, and pauses while a dialog or menu is open. The Stimulus controllers are in <code>assets/controllers/</code>, one file each, loaded through the import map.</p>
+      <p>Access control is declared in <code>config/packages/security.yaml</code>: <code>/admin</code> needs <code>ROLE_ADMIN</code>, everything else <code>ROLE_MEMBER</code>, and <code>ProjectVoter</code> narrows members to their projects. In dev and test a stand-in authenticator replaces the proxy, so you can pick a role without Authelia.</p>
+    </section>
+
+    <!-- CLI -->
+    <section>
+      <h2 id="cli"><svg class="icon icon-sm"><use href="#i-terminal"/></svg>CLI and API</h2>
+      <p>The CLI is the Symfony console. Commands are named <code>fleet:&lt;group&gt;:&lt;action&gt;</code> and live in <code>app/src/Command/&lt;Group&gt;/</code>. On a host, <code>/usr/local/bin/fleet</code> is a small wrapper that switches to the <code>fleet</code> user, loads <code>/etc/ddev-fleet/fleet.env</code> and adds the <code>fleet:</code> prefix, so you type:</p>
+      <div class="tbl-wrap">
+        <table>
+          <tbody>
+            <tr><td class="k">fleet project:create, template:create</td><td>Describe a repository and its recipes.</td></tr>
+            <tr><td class="k">fleet instance:deploy | redeploy | start | stop | destroy | list | log</td><td>The instance lifecycle. A deploy follows the job's log in the terminal.</td></tr>
+            <tr><td class="k">fleet job:list | show | retry</td><td>The job history.</td></tr>
+            <tr><td class="k">fleet webhook:*, schedule:*, secret:*, port:*, ssh:*</td><td>Automation, secrets, named ports and keys.</td></tr>
+            <tr><td class="k">fleet host:capacity, host:slices, host:tls-status</td><td>Host-level reports and repairs.</td></tr>
+            <tr><td class="k">fleet tmux [&lt;instance-id&gt;]</td><td>Attach to the tmux workspace (handled by the wrapper).</td></tr>
+            <tr><td class="k">sudo fleet upgrade</td><td>Upgrade or roll back the host (handled by a root helper).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>The CLI and the UI share the same services.</strong> A controller and a command are both thin: <code>InstanceController</code>, <code>Command\Instance\DeployCommand</code>, the API's <code>InstanceWriteController</code>, the webhook deploy action and the schedule's redeploy action all call <code>InstanceService</code>, which applies the same guards and queues the same jobs. Only the job's trigger and requester differ. When you add a feature, put the logic in a service under <code>src/Fleet/</code> and keep both entry points thin.</p>
+      <p>The HTTP API under <code>/api/v1</code> is a third entry point, for machines: bearer tokens, rate limits, and an OpenAPI description at <code>/api/v1/openapi.json</code>. The CLI reference in the docs is generated from the commands by <code>fleet:docs:cli</code>.</p>
+    </section>
+
+    <!-- SCHEDULING -->
+    <section>
+      <h2 id="schedules"><svg class="icon icon-sm"><use href="#i-clock"/></svg>Scheduling</h2>
+      <p>Recurring work comes from three places. None of them runs host commands directly; anything heavy becomes a job.</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Mechanism</th><th>What runs</th><th>Defined in</th></tr></thead>
+          <tbody>
+            <tr><td class="kw">User schedules</td><td>A five-field cron expression in an IANA timezone, with a target instance. The only action is <code>redeploy</code>.</td><td>The database (<code>Schedule</code>), edited at <code>/admin/schedules</code> or with <code>fleet schedule:*</code>.</td></tr>
+            <tr><td class="kw">The status watcher</td><td>Instance state refresh, memory and CPU sampling, the job reaper, the daily retention prune.</td><td><code>InstanceWatcher</code>, a loop in the <code>fleet-status</code> service.</td></tr>
+            <tr><td class="kw">systemd timers</td><td>Database backup, certificate health check, release check.</td><td>Unit files in <code>install/etc/</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>User schedules use Symfony Scheduler for the clock only. <code>FleetSchedule</code> emits one <code>TickSchedules</code> message every 30 seconds on the <code>scheduler_default</code> transport, consumed by <code>fleet-scheduler</code>. The handler asks <code>ScheduleTicker</code>, which reads the schedules from the database, works out what is due, claims each occurrence exactly once (a <code>ScheduleRun</code> row) and queues a normal redeploy job. Because the decision comes from the database, a schedule edited in the UI takes effect at the next tick with no restart. After downtime only the most recent missed occurrence fires, and only if it is under an hour old. A busy target is skipped, not queued twice.</p>
+      <p>Fleet ships no built-in recurring jobs of its own beyond these. A nightly CI baseline or a fresh demo every morning is simply a schedule you create that redeploys an instance whose template runs the work.</p>
+    </section>
+
+    <!-- HOOKS -->
+    <section>
+      <h2 id="hooks"><svg class="icon icon-sm"><use href="#i-zap"/></svg>Webhooks and instance-side hooks</h2>
+      <p>Webhooks let an outside event deploy an instance. Two sources exist today, Jira and Bitbucket, on one route:</p>
+      <p><code>POST /hooks/{source}/{project}</code> → <code>WebhookReceiverController</code> → <code>App\Fleet\Webhooks\WebhookReceiver</code></p>
+      <ol class="steps">
+        <li><strong>Receiver exists?</strong> Unknown project, or no secret configured yet: 404. Caddy lets <code>/hooks/*</code> through without login and caps the body at 1 MB.</li>
+        <li><strong>Signature.</strong> <code>X-Hub-Signature: sha256=…</code> must be the HMAC-SHA256 of the raw body with the endpoint's secret (<code>Signature</code>). Otherwise 401, and nothing is recorded but a log warning.</li>
+        <li><strong>Match.</strong> <code>RuleMatcher</code> is a pure function over the payload and the project's rules; the first matching rule wins. A Jira rule matches an issue <em>moving into</em> a status, and the issue key must fit the project's issue-id pattern. A Bitbucket rule matches an event, a repository and optionally a branch glob, a commit status or a comment line.</li>
+        <li><strong>Deduplicate.</strong> The delivery id header (<code>X-Atlassian-Webhook-Identifier</code> or <code>X-Request-UUID</code>) is consumed, and because that header is not signed, a hash of the body is kept for an hour too. A repeat answers <code>duplicate</code>.</li>
+        <li><strong>Act.</strong> The <code>deploy</code> action calls <code>InstanceService</code> like a person would, with trigger <code>webhook</code>. For Jira the lowercased issue key becomes the label: <code>MYPROJECT-3</code> entering "Dispatched" deploys <code>myproject--myproject-3</code> from the rule's template. Bitbucket rules derive the label from the pushed branch, or keep one fixed instance and redeploy it. The other action, <code>run-pipeline</code>, starts a Bitbucket pipeline.</li>
+      </ol>
+      <p>Once a delivery is claimed the sender always gets a 200 with <code>accepted</code>, <code>ignored</code>, <code>duplicate</code> or <code>failed</code>, so senders never retry into a loop. Every authenticated request is a <code>WebhookDelivery</code> row, visible at <code>/admin/webhooks</code>. A push that arrives while its instance is busy is remembered as one pending redeploy and runs when the active job ends.</p>
+
+      <p class="label">Inside the instance</p>
+      <p>The template supplies the hooks that run on the instance side of a deploy, in this order:</p>
+      <ul class="plain">
+        <li><strong>Post-deploy commands</strong> run after <code>ddev start</code>, one line at a time, for example <code>composer install</code>. A failing line fails the deploy.</li>
+        <li><strong>The tmux window</strong> opens last (<code>TmuxWindowStep</code>): a sidebar plus two shells in the checkout, <code>tty1</code> and <code>tty2</code>. The template's <code>tty1</code> and <code>tty2</code> lines are typed into them, only after the last post-deploy line succeeded. Typically <code>tty1</code> starts a runner and <code>tty2</code> starts a coding agent.</li>
+      </ul>
+      <p>Commands and asset files can use context tokens: <code>[[instance-id]]</code>, <code>[[project]]</code>, <code>[[instance]]</code>, <code>[[branch]]</code>, <code>[[instance-fqdn]]</code>, <code>[[fleet-domain]]</code> and <code>[[issue-id]]</code>. The last one is extracted from the label or branch with the project's issue-id regular expression. The same values reach the container as <code>FLEET_*</code> environment variables. That is how a ticket becomes a working agent with no further glue: the Jira webhook picks the template and the label, and a <code>tty2</code> line such as <code>ddev exec claude "/jira work [[issue-id]]"</code> starts the agent on that ticket. The agent's token is injected as an environment variable, never on a command line.</p>
+    </section>
+
+    <!-- INSTALL -->
+    <section>
+      <h2 id="install"><svg class="icon icon-sm"><use href="#i-download"/></svg>Install, upgrade and CI</h2>
+      <div class="grid">
+        <div class="card print-card">
+          <h3>Install</h3>
+          <p><code>install/install.sh</code> runs on a fresh Debian 13 host with <code>--domain</code> and usually <code>--ref=vX.Y.Z</code>. Stage one creates the <code>fleet</code> user and clones the ref into <code>/opt/ddev-fleet</code>. Stage two runs the Ansible playbook <code>install/ansible/site.yml</code> locally. Its roles: <code>packages</code>, <code>docker</code>, <code>fleet_user</code>, <code>shell</code>, <code>ddev</code>, <code>caddy</code>, <code>authelia</code>, <code>php_app</code>, <code>app_code</code>, <code>privileged</code>, <code>units</code>, and <code>hardening</code> on request. It ends by printing the URL of the browser setup wizard.</p>
+        </div>
+        <div class="card print-card">
+          <h3>Upgrade</h3>
+          <p>The playbook is idempotent, so upgrading is running the installer again at a newer tag. <code>sudo fleet upgrade</code> wraps that with a database backup, pre-flight checks, a verification and a rollback path. It is command-line only, because it restarts the services a web request would depend on. Hosts only ever run release tags (<code>v1.*</code> on <code>main</code>).</p>
+        </div>
+        <div class="card print-card">
+          <h3>Gates</h3>
+          <p>From <code>app/</code>, <code>composer run gates</code> runs <code>assets</code> (import map and Tailwind build), <code>cs</code>, <code>stan</code>, <code>lint</code> and <code>test</code> (PHPUnit). Then, in <code>tests/playwright</code>, <code>npm run typecheck</code> and <code>npx playwright test</code>, which starts its own throw-away app when <code>FLEET_E2E_BASE_URL</code> is unset.</p>
+        </div>
+        <div class="card print-card">
+          <h3>Fleet CI</h3>
+          <p>CI is the same gates run by <code>ci/run-gates.sh</code> on every push to <code>feature/*</code>, <code>release/*</code> and <code>develop</code>, after merging <code>develop</code> in, and reported on the commit as the status <code>fleet-gates</code>. Feature pushes get a quick tier; release branches and the nightly <code>develop</code> run get the full suite. The scripts live in <code>ci/</code>.</p>
+        </div>
+      </div>
+      <p>Details: <code>docs/reference/04-installer.md</code>, <code>05-upgrade.md</code> and <code>docs/contributing/</code> in the product repo.</p>
+    </section>
+
+    <!-- CODE MAP -->
+    <section>
+      <h2 id="map"><svg class="icon icon-sm"><use href="#i-folder"/></svg>Where to look in the code</h2>
+      <div class="tbl-wrap" style="margin-top:1.25rem">
+        <table>
+          <thead><tr><th>Path (repo root)</th><th>What lives there</th></tr></thead>
+          <tbody>
+            <tr><td class="k">app/src/Domain/</td><td>Entities, enums and repositories, one folder per area (<code>Project</code>, <code>Template</code>, <code>Instance</code>, <code>Job</code>, <code>Host</code>, <code>User</code>, <code>Webhook</code>, <code>Schedule</code>, …).</td></tr>
+            <tr><td class="k">app/src/Fleet/</td><td>The services: the real logic. <code>Instances/</code> (deploy workflow, naming, config writers), <code>Jobs/</code>, <code>Shell/</code>, <code>Ddev/</code>, <code>Git/</code>, <code>Webhooks/</code>, <code>Schedules/</code>, <code>Host/</code> (capacity, provisioning), <code>Secrets/</code>, <code>Workspace/</code> (tmux), <code>Tls/</code>, <code>Upgrade/</code>.</td></tr>
+            <tr><td class="k">app/src/Message/, MessageHandler/</td><td>The three Messenger messages (<code>RunJob</code>, <code>TickSchedules</code>, <code>RefreshReleaseCatalog</code>) and their handlers.</td></tr>
+            <tr><td class="k">app/src/Controller/</td><td>Thin HTTP entry points: member pages at the root, <code>Admin/</code>, <code>Api/</code>, <code>Setup/</code>, and <code>WebhookReceiverController</code>.</td></tr>
+            <tr><td class="k">app/src/Command/</td><td>Thin console entry points, one folder per <code>fleet:</code> group.</td></tr>
+            <tr><td class="k">app/src/Security/, Setup/</td><td>The proxy-identity authenticator, API tokens, the project voter; the first-run wizard's gate and steps.</td></tr>
+            <tr><td class="k">app/templates/</td><td>Pages, <code>_shell/</code>, <code>components/</code>, and <code>system/</code> (the Twig sources of the Caddy and Authelia configuration).</td></tr>
+            <tr><td class="k">app/assets/</td><td><code>controllers/</code> (Stimulus), <code>styles/</code> (Tailwind entry and tokens), <code>icons/</code>.</td></tr>
+            <tr><td class="k">app/config/packages/</td><td><code>messenger.yaml</code>, <code>doctrine.yaml</code>, <code>security.yaml</code>, <code>mercure.yaml</code>, <code>lock.yaml</code>, <code>rate_limiter.yaml</code>.</td></tr>
+            <tr><td class="k">app/migrations/</td><td>Doctrine migrations; every schema change adds one.</td></tr>
+            <tr><td class="k">app/tests/, tests/</td><td>PHPUnit suites; Playwright and pytest suites.</td></tr>
+            <tr><td class="k">install/</td><td><code>install.sh</code>, <code>run.sh</code>, <code>ansible/</code> (the playbook and roles), <code>etc/</code> (systemd units, php-fpm pool), <code>bin/fleet</code> (the CLI wrapper), <code>libexec/</code> (the root helpers).</td></tr>
+            <tr><td class="k">ci/, changelog.d/</td><td>The gates script, the tag guard and other CI tools; one changelog fragment per change.</td></tr>
+            <tr><td class="k">docs/</td><td><code>concepts.md</code> first, then <code>guides/</code>, <code>reference/</code> and <code>contributing/</code>.</td></tr>
+            <tr><td class="k">CLAUDE.md</td><td>The conventions every change must follow, for people and agents alike.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- GLOSSARY -->
+    <section>
+      <h2 id="glossary"><svg class="icon icon-sm"><use href="#i-book"/></svg>Glossary</h2>
+      <div class="tbl-wrap" style="margin-top:1.25rem">
+        <table>
+          <tbody>
+            <tr><td class="kw">Allotment</td><td>A CPU-thread ceiling shared by all instances of a project or template, enforced by a systemd slice.</td></tr>
+            <tr><td class="kw">Context token</td><td>A built-in <code>[[name]]</code> placeholder such as <code>[[issue-id]]</code>, replaced in commands and asset files at deploy.</td></tr>
+            <tr><td class="kw">ddev-router</td><td>DDEV's shared Traefik container. Behind Caddy it only routes by <code>Host</code> on loopback.</td></tr>
+            <tr><td class="kw">FLEET_HOME</td><td>The directory holding everything Fleet persists; <code>/srv/fleet</code> on a host.</td></tr>
+            <tr><td class="kw">Gate</td><td>Two meanings. At runtime: the Authelia check Caddy applies. In development: a check that must pass before a merge.</td></tr>
+            <tr><td class="kw">Instance id</td><td><code>&lt;project&gt;--&lt;label&gt;</code>: DDEV project name, directory name and hostname prefix at once.</td></tr>
+            <tr><td class="kw">Job</td><td>A queued host action with a status and a log. The only way <code>ddev</code>, <code>git</code> or <code>docker</code> ever run.</td></tr>
+            <tr><td class="kw">Named port</td><td>An extra public port per instance (for example a search server), served by Caddy behind the same gate.</td></tr>
+            <tr><td class="kw">Root helper</td><td><code>/usr/local/libexec/fleet/apply</code>: the one privileged command the app may call, to install generated configuration.</td></tr>
+            <tr><td class="kw">Slice</td><td>The systemd cgroup that carries an allotment's CPU quota.</td></tr>
+            <tr><td class="kw">Slot</td><td>One concurrent heavy run in a template or project; advisory, taken with <code>flock</code>.</td></tr>
+            <tr><td class="kw">Template</td><td>A recipe inside a project that says how an instance is built and what runs in it.</td></tr>
+            <tr><td class="kw">tmux workspace</td><td>The persistent tmux session with a window per instance; panes <code>tty1</code> and <code>tty2</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>
+      How Fleet works · Last updated 2026-11-16 · Describes the 1.x Symfony line. See <a href="README.md">README.md</a> and <a href="docs/concepts.md">docs/concepts.md</a>.
+    </footer>
+  </main>
+
+  <script>
+    (function () {
+      var html = document.documentElement;
+      var stored = null;
+      try { stored = localStorage.getItem('fleet-docs-theme'); } catch (e) {}
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var initial = stored ? stored : (prefersDark ? 'dark' : 'light');
+      if (initial === 'dark') html.classList.add('dark');
+      var btn = document.getElementById('theme-toggle');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          var isDark = html.classList.toggle('dark');
+          try { localStorage.setItem('fleet-docs-theme', isDark ? 'dark' : 'light'); } catch (e) {}
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
