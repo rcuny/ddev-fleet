@@ -46,6 +46,7 @@ final class TemplateShowCommand extends Command
                     'ssh keys' => $template->sshKeys(),
                     'ssh identities' => $template->sshIdentities()->label(),
                     'database' => $template->hasDatabase() ? 'yes' : 'no (DB_HOST is poisoned)',
+                    'mailpit' => $template->hasMailpit() ? 'yes' : 'no',
                     'agent' => $template->isAgent() ? 'yes' : 'no',
                     'cpu threads' => $template->cpuThreads() ?? 'inherits the project\'s',
                     'slots' => $template->slots() ?? 'unlimited',

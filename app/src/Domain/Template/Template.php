@@ -61,6 +61,10 @@ class Template
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
     private bool $agent = false;
 
+    /** Whether the instance's Mailpit is reachable at mailpit--<instance>.<domain> (FLE-344). False: no Caddy route, no link. */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $mailpit = false;
+
     /** CPU threads all instances of the template may use together; null = inherits the project's (FLE-197). */
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $cpuThreads = null;
@@ -150,6 +154,17 @@ class Template
     public function hasDatabase(): bool
     {
         return $this->database;
+    }
+
+    public function hasMailpit(): bool
+    {
+        return $this->mailpit;
+    }
+
+    public function changeMailpit(bool $mailpit, ?\DateTimeImmutable $now = null): void
+    {
+        $this->mailpit = $mailpit;
+        $this->touch($now);
     }
 
     public function isAgent(): bool

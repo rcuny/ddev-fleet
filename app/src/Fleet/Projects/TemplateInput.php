@@ -20,6 +20,7 @@ final readonly class TemplateInput
      * @param SshIdentities $sshIdentities whether the agent also holds the host's push key (FLE-266)
      * @param bool          $database      whether the instance has a database of its own; false poisons DB_HOST (FLE-300)
      * @param bool          $agent         whether an AI agent works in the instance (FLE-300)
+     * @param bool          $mailpit       whether the instance's Mailpit is exposed at mailpit--<instance> (FLE-344)
      */
     public function __construct(
         public string $name,
@@ -33,6 +34,7 @@ final readonly class TemplateInput
         public SshIdentities $sshIdentities = SshIdentities::PushAndExtras,
         public bool $database = true,
         public bool $agent = false,
+        public bool $mailpit = false,
     ) {
     }
 
@@ -50,6 +52,7 @@ final readonly class TemplateInput
             $template->sshIdentities(),
             $template->hasDatabase(),
             $template->isAgent(),
+            $template->hasMailpit(),
         );
     }
 
@@ -85,6 +88,7 @@ final readonly class TemplateInput
             $this->sshIdentities,
             $this->database,
             $this->agent,
+            $this->mailpit,
         );
     }
 

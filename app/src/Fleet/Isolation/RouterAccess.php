@@ -72,13 +72,19 @@ final readonly class RouterAccess
             $entryPoints = $this->httpEntryPoints();
             $warning = null;
             if (null === $entryPoints) {
-                // The router's API does not answer. Rendering without entry points would bind the deny routers to the mirror's entry points
-                // as well, so the entry points of the last good file are reused (the instances are still
-                // refreshed); with no usable last file the deny routers bind to every entry point (closed) until the API answers again.
+                // The router's API does not answer. Rendering without entry points would bind the deny routers to the :443 mirror again
+                // (an instance's own name answers 404), so the entry points of the last good file are reused (the instances are still
+                // refreshed); with no usable last file they bind to DDEV's http and https entry points named in its global
+                // configuration, never to a mirror entry point, so an own name over :443 keeps working (FLE-336).
                 $entryPoints = $this->lastEntryPoints();
-                $warning = 'router access: the Traefik API did not answer, '.([] === $entryPoints ? 'the deny routers are bound to every entry point' : 'the entry points of the last good file are kept').' (retry on the next pass)';
+                $source = 'the entry points of the last good file are kept';
+                if ([] === $entryPoints) {
+                    $entryPoints = $this->traefik->routerHttpEntryPoints();
+                    $source = 'the deny routers are bound to DDEV\'s http and https entry points ('.implode(', ', $entryPoints).')';
+                }
+                $warning = 'router access: the Traefik API did not answer, '.$source.' (retry on the next pass)';
             }
-            $text = RouterAccessRenderer::render(array_values($entries), $entryPoints);
+            $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror(), $entryPoints);
             if ('' === $text) {
                 return $this->withdraw();
             }
@@ -215,10 +221,42 @@ final readonly class RouterAccess
         if (!\is_string($text)) {
             return [];
         }
-        if (1 !== preg_match('/^      entryPoints: \[([A-Za-z0-9_, -]+)\]$/m', $text, $m)) {
+        $http = explode("\ntcp:\n", $text, 2)[0];
+        if (1 !== preg_match('/^      entryPoints: \[([A-Za-z0-9_, -]+)\]$/m', $http, $m)) {
             return [];
         }
 
         return array_values(array_filter(array_map('trim', explode(',', $m[1])), static fn (string $n): bool => '' !== $n && !str_starts_with($n, 'fleet-mirror-')));
+    }
+
+    /**
+     * The `:443` site mirror is part of the router path only while it sends PROXY: the port mirror's static fragment declares its entry
+     * point AND its dynamic file has the PROXY header on the passthrough. Without the header the re-entry looks local, so the SNI
+     * allow/deny routers stay out and `:443` behaves as in `off` mode (FLE-336: isolation is then not enforced there, said by the refresh).
+     */
+    private function siteMirror(): bool
+    {
+        $static = @file_get_contents($this->traefik->staticFile());
+
+        if (!\is_string($static)) {
+            return false;
+        }
+        try {
+            $data = \Symfony\Component\Yaml\Yaml::parse($static);
+        } catch (\Symfony\Component\Yaml\Exception\ParseException) {
+            return false;
+        }
+
+        if (!\is_array($data) || !\is_array($data['entryPoints'] ?? null) || !\array_key_exists(RouterAccessRenderer::SITE_ENTRYPOINT, $data['entryPoints'])) {
+            return false;
+        }
+        $dynamic = @file_get_contents($this->traefik->dynamicFile());
+        try {
+            $routing = \is_string($dynamic) ? \Symfony\Component\Yaml\Yaml::parse($dynamic) : null;
+        } catch (\Symfony\Component\Yaml\Exception\ParseException) {
+            return false;
+        }
+
+        return 2 === ($routing['tcp']['services'][RouterAccessRenderer::SITE_ENTRYPOINT]['loadBalancer']['proxyProtocol']['version'] ?? null);
     }
 }

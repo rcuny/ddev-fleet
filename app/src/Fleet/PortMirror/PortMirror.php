@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\PortMirror;
 
 use App\Domain\Host\HostSettingsRepository;
+use App\Domain\Host\IsolationMode;
 use App\Domain\Port\NamedPortRepository;
 
 /**
@@ -38,7 +39,24 @@ final readonly class PortMirror
      */
     public function plan(): MirrorPlan
     {
-        return $this->planner->plan($this->enabled(), $this->ports->all());
+        $plan = $this->planner->plan($this->enabled(), $this->ports->all());
+        if (null === $plan->siteTarget) {
+            return $plan;
+        }
+
+        // FLE-326: the passthrough may send a PROXY header only to a router whose LIVE static configuration already trusts it (an
+        // unreachable API counts as "does not"): otherwise own-name HTTPS over :443 would close. The trust comes first, then the header.
+        // FLE-336: and only while isolation is in `enforce` mode: in `off` and `report` the static configuration and the mirror stay as they were before.
+        $trust = $this->isolationEnforced();
+
+        return $plan->withProxy($trust && true === $this->live->proxyTrusted(MirrorPlan::siteTargetEntrypoint($plan->siteTarget)), $trust);
+    }
+
+    /** FLE-336: the router's static configuration and PROXY header are touched in this mode only. */
+    public function isolationEnforced(): bool
+    {
+        // fresh(): the isolation watcher is one long process; its identity map would keep the mode it first read.
+        return IsolationMode::Enforce === $this->settings->fresh()?->isolationMode();
     }
 
     public function enabled(): bool

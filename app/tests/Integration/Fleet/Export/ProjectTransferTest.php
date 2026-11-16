@@ -148,6 +148,28 @@ final class ProjectTransferTest extends KernelTestCase
         return $ports->get('typesense')->access();
     }
 
+    public function testTheMailpitOptionRoundTripsAndAnOlderFileWithoutItGetsOff(): void
+    {
+        $this->seedBlog();
+        $document = $this->decode($this->exporter()->export('blog', null, 'admin'));
+        self::assertFalse($document['templates'][0]['mailpit']);
+        $document['templates'][0]['mailpit'] = true;
+        $text = $this->encode($document);
+
+        $this->switchToEmptyHost();
+        $this->importer()->apply($text, null, 'admin');
+        $exported = $this->exporter()->export('blog', null, 'admin');
+        self::assertTrue($this->decode($exported)['templates'][0]['mailpit']);
+        self::assertFalse($this->importer()->preview($text)->changes(), 'the option is part of the comparison');
+
+        // a file written before the option existed
+        unset($document['templates'][0]['mailpit']);
+        self::assertTrue($this->importer()->preview($this->encode($document))->changes(), 'turning the option back off is a change');
+        $this->switchToEmptyHost();
+        $this->importer()->apply($this->encode($document), null, 'admin');
+        self::assertFalse($this->decode($this->exporter()->export('blog', null, 'admin'))['templates'][0]['mailpit']);
+    }
+
     public function testThePortAccessRoundTripsAndAnOlderFileWithoutItGetsTheDefault(): void
     {
         $this->seedBlog();

@@ -102,6 +102,27 @@ final class RouterConverger
     }
 
     /**
+     * FLE-326: one restart of the router so a changed static configuration (pushed into its own copy by RouterCopies) goes live.
+     * Under the mirror lock; every instance blinks for the restart, so callers log it.
+     *
+     * @return string|null null when the router is back and healthy, else why not
+     */
+    public function restartForConfig(float $restartTimeout = 45.0, float $healthWait = 30.0): ?string
+    {
+        try {
+            return $this->lock->run(function () use ($restartTimeout, $healthWait): ?string {
+                if (!$this->restartRouter($restartTimeout)) {
+                    return 'docker restart '.self::ROUTER.' failed or took longer than '.(int) $restartTimeout.' s';
+                }
+
+                return $this->routerHealthy($healthWait) ? null : \sprintf('%s was not healthy within %gs after the restart', self::ROUTER, $healthWait);
+            });
+        } catch (MirrorLockBusy $e) {
+            return $e->getMessage().'; the restart was skipped';
+        }
+    }
+
+    /**
      * @param list<string> $wanted
      *
      * @return string|null null when the router is back with the wanted entrypoints, else why not
@@ -176,10 +197,10 @@ final class RouterConverger
         throw new PortMirrorFailed(\sprintf('The in-network port mirror could not be applied: %s. The mirror files were removed, %s and %s restarted, so the router runs without the mirror.%s The mirror stays off (%s in %s) until you run "fleet port:refresh". Check "docker logs %s", or switch the mirror off in the host settings.', $reason, $startText, self::ROUTER, [] === $notes ? '' : ' Self-repair problems: '.implode('; ', $notes).'.', TraefikDirectory::MARKER_FILENAME, $this->traefik->dir(), self::ROUTER));
     }
 
-    private function restartRouter(): bool
+    private function restartRouter(float $timeout = self::RESTART_TIMEOUT): bool
     {
         try {
-            $restarted = $this->runner->run(['docker', 'restart', self::ROUTER], null, [], null, self::RESTART_TIMEOUT)->isSuccess();
+            $restarted = $this->runner->run(['docker', 'restart', self::ROUTER], null, [], null, $timeout)->isSuccess();
         } catch (\Throwable) {
             return false;
         }
@@ -195,9 +216,9 @@ final class RouterConverger
         return $restarted;
     }
 
-    private function routerHealthy(): bool
+    private function routerHealthy(?float $wait = null): bool
     {
-        $attempts = (int) floor($this->healthWait / self::HEALTH_POLL_SECONDS) + 1;
+        $attempts = (int) floor(($wait ?? $this->healthWait) / self::HEALTH_POLL_SECONDS) + 1;
         for ($attempt = 0; $attempt < $attempts; ++$attempt) {
             try {
                 $result = $this->runner->run(['docker', 'inspect', '-f', self::HEALTH_TEMPLATE, self::ROUTER], null, [], null, self::INSPECT_TIMEOUT);

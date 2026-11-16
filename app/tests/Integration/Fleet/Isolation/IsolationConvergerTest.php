@@ -57,7 +57,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         $this->scriptDocker();
     }
 
-    private function makeConverger(): IsolationConverger
+    private function makeConverger(?\App\Fleet\PortMirror\PortMirror $mirror = null, ?\App\Fleet\PortMirror\RouterCopies $copies = null): IsolationConverger
     {
         $system = self::getContainer()->get(SystemRenderer::class);
         self::assertInstanceOf(SystemRenderer::class, $system);
@@ -90,6 +90,8 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             new \App\Fleet\Isolation\NftablesServiceGuard($this->runner),
             new \App\Fleet\Isolation\BridgeNetfilterGuard($this->bridgeDir()),
             $access,
+            $copies,
+            $mirror,
         );
     }
 
@@ -163,6 +165,90 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         $this->converger->pass();
 
         self::assertFileDoesNotExist($this->routerFile());
+    }
+
+    /** FLE-336: turning isolation off rewrites the :443 mirror without PROXY and returns only after that, not at the next watcher pass. */
+    public function testDisablingDropsTheProxyHeaderOfTheMirrorBeforeItReturns(): void
+    {
+        $home = sys_get_temp_dir().'/fleet-user-home-'.bin2hex(random_bytes(6));
+        mkdir($home.'/.ddev/traefik', 0o755, true);
+        file_put_contents($home.'/.ddev/global_config.yaml', "router_https_port: 8443\n");
+        $traefik = new \App\Fleet\PortMirror\TraefikDirectory($home);
+        $live = new \App\Tests\Support\FakeLiveEntrypoints(['http-8443']);
+        $mirror = new \App\Fleet\PortMirror\PortMirror(
+            $this->host,
+            new NamedPortRepository($this->em),
+            new \App\Fleet\PortMirror\MirrorPlanner($traefik),
+            new \App\Fleet\PortMirror\MirrorFiles($traefik),
+            new \App\Fleet\PortMirror\MirrorLock(new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir())), 0.0),
+            $live,
+            $traefik,
+        );
+        $converger = $this->makeConverger($mirror, new \App\Fleet\PortMirror\RouterCopies($this->runner, $traefik, $live));
+        $this->mode(IsolationMode::Enforce);
+        $mirror->sync();
+        self::assertStringContainsString('proxyProtocol', (string) file_get_contents($traefik->dynamicFile()), 'enforce and a trusting router: the mirror sends PROXY');
+
+        $converger->changeMode(IsolationMode::Off, 'cli');
+
+        self::assertStringNotContainsString('proxyProtocol', (string) file_get_contents($traefik->dynamicFile()));
+    }
+
+    /** @return array{0: IsolationConverger, 1: \App\Fleet\PortMirror\PortMirror, 2: \App\Fleet\PortMirror\TraefikDirectory} */
+    private function mirrorConverger(): array
+    {
+        $home = sys_get_temp_dir().'/fleet-user-home-'.bin2hex(random_bytes(6));
+        mkdir($home.'/.ddev/traefik', 0o755, true);
+        file_put_contents($home.'/.ddev/global_config.yaml', "router_https_port: 8443\n");
+        $traefik = new \App\Fleet\PortMirror\TraefikDirectory($home);
+        $live = new \App\Tests\Support\FakeLiveEntrypoints(['http-8443']);
+        $mirror = new \App\Fleet\PortMirror\PortMirror(
+            $this->host,
+            new NamedPortRepository($this->em),
+            new \App\Fleet\PortMirror\MirrorPlanner($traefik),
+            new \App\Fleet\PortMirror\MirrorFiles($traefik),
+            new \App\Fleet\PortMirror\MirrorLock(new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir())), 0.0),
+            $live,
+            $traefik,
+        );
+
+        return [$this->makeConverger($mirror, new \App\Fleet\PortMirror\RouterCopies($this->runner, $traefik, $live)), $mirror, $traefik];
+    }
+
+    /** FLE-343 (FLE-336 review): the pass in report mode drops PROXY from the mirror and never restarts or rewrites the router's static file. */
+    public function testAReportModePassDropsTheProxyHeaderAndNeverRestartsTheRouter(): void
+    {
+        [$converger, $mirror, $traefik] = $this->mirrorConverger();
+        $this->mode(IsolationMode::Enforce);
+        $mirror->sync();
+        self::assertStringContainsString('proxyProtocol', (string) file_get_contents($traefik->dynamicFile()));
+        $this->mode(IsolationMode::Report);
+
+        $converger->pass();
+
+        self::assertStringNotContainsString('proxyProtocol', (string) file_get_contents($traefik->dynamicFile()));
+        foreach ($this->runner->calls() as $call) {
+            self::assertNotSame(['docker', 'restart'], \array_slice($call->argv, 0, 2), 'a pass never restarts the router');
+        }
+    }
+
+    /** Enforce, then report: the order matters, PROXY goes first and the pass logs nothing about a restart in report mode. */
+    public function testEnforceThenReportDropsProxyAtTheFirstReportPass(): void
+    {
+        [$converger, $mirror, $traefik] = $this->mirrorConverger();
+        $this->mode(IsolationMode::Enforce);
+        $converger->pass();
+        $mirror->sync();
+        self::assertStringContainsString('proxyProtocol', (string) file_get_contents($traefik->dynamicFile()));
+        $this->mode(IsolationMode::Report);
+        $lines = [];
+
+        $converger->pass(static function (string $line) use (&$lines): void {
+            $lines[] = $line;
+        });
+
+        self::assertStringNotContainsString('proxyProtocol', (string) file_get_contents($traefik->dynamicFile()));
+        self::assertSame([], array_filter($lines, static fn (string $l): bool => str_contains($l, 'has not restarted')));
     }
 
     public function testDisablingRemovesTheRouterFile(): void

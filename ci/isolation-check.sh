@@ -13,10 +13,24 @@
 # It changes the isolation mode of THIS host and leaves it `off` at the end (also on failure, via the trap).
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-  printf 'usage: %s <source-project> <target-project> <service> <port>\n' "$0" >&2
+usage() {
+  cat >&2 <<EOF
+usage: $0 <source-project> <target-project> <service> <port>
+  <source-project>, <target-project>  project NAMES (for example demo, blog), not instance ids such as demo--t1
+  <service>                           the target's service to link to (for example typesense, web)
+  <port>                              its port (for example 8108, 80)
+example: sudo $0 demo blog typesense 8108
+Both projects need a running instance with the same label. Run it ON a throwaway host, never while another isolation command runs;
+it ends with isolation off. Exit codes: 0 all probes behaved as expected, 1 a probe or check failed, 64 wrong arguments.
+EOF
+}
+if [ "$#" -ne 4 ] || [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
+  usage
   exit 64
 fi
+case "$1$2" in
+  *--*) printf 'error: give project names, not instance ids (no "--" in them)\n\n' >&2; usage; exit 64 ;;
+esac
 SRC=$1
 DST=$2
 SERVICE=$3
