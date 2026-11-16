@@ -28,8 +28,12 @@ handle @i_{{ id }} {
 {% else %}
 # Every name of this instance still has its own certificate and is served from instances/{{ id }}.sites.
 {% endif %}
+{% if mailpit %}
+{% include 'system/instance-mailpit.twig' %}{% endif %}
 {% else %}
 {% include 'system/instance-block.twig' with {block_hosts: hosts} %}{% if ports %}
 {% include 'system/instance-sites.twig' with {header: false} %}{% endif %}
+{% if mailpit %}
+{% include 'system/instance-mailpit.twig' %}{% endif %}
 {% endif %}
 {% endautoescape %}

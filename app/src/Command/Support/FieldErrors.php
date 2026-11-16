@@ -19,6 +19,7 @@ final readonly class FieldErrors
         'sshIdentities' => 'ssh-identities',
         'database' => 'database',
         'agent' => 'agent',
+        'mailpit' => 'mailpit',
     ];
 
     /**

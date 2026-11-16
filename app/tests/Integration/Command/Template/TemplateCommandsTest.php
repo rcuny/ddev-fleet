@@ -59,7 +59,7 @@ final class TemplateCommandsTest extends KernelTestCase
         self::assertSame('web', $object['name']);
         self::assertSame('dev', $object['drupal_env']);
         self::assertSame(['exec' => ['composer install', 'drush deploy'], 'tty1' => ['npm run watch'], 'tty2' => ['tail -f var/log/dev.log']], $object['post_deploy']);
-        self::assertSame(['project', 'name', 'drupal_env', 'post_deploy', 'ssh_keys', 'ssh_identities', 'database', 'agent', 'cpu_threads', 'slots', 'created_at', 'updated_at'], array_keys($object));
+        self::assertSame(['project', 'name', 'drupal_env', 'post_deploy', 'ssh_keys', 'ssh_identities', 'database', 'mailpit', 'agent', 'cpu_threads', 'slots', 'created_at', 'updated_at'], array_keys($object));
         self::assertMatchesRegularExpression('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', (string) $object['created_at']);
 
         self::assertSame($object, $this->json($this->cli('fleet:template:show', ['project' => 'blog', 'name' => 'web', '--format' => 'json'])));
@@ -159,6 +159,27 @@ final class TemplateCommandsTest extends KernelTestCase
         self::assertSame(['b'], $template->tty1());
         self::assertSame(['d', 'e'], $template->tty2());
         self::assertSame(['d', 'e'], $this->json($update)['post_deploy']['tty2'] ?? null);
+    }
+
+    public function testMailpitOptionDefaultsToOffAndRoundTrips(): void
+    {
+        $created = $this->cli('fleet:template:create', ['project' => 'blog', 'name' => 'web', '--json' => true]);
+        self::assertSame(0, $created->getStatusCode(), $created->getErrorOutput());
+        self::assertFalse($this->json($created)['mailpit']);
+        self::assertFalse($this->stored('blog', 'web')->hasMailpit());
+
+        $on = $this->cli('fleet:template:update', ['project' => 'blog', 'name' => 'web', '--mailpit' => 'yes', '--json' => true]);
+        self::assertSame(0, $on->getStatusCode(), $on->getErrorOutput());
+        self::assertTrue($this->json($on)['mailpit']);
+        self::assertTrue($this->stored('blog', 'web')->hasMailpit());
+        self::assertStringContainsString("mailpit: yes\n", $this->cli('fleet:template:show', ['project' => 'blog', 'name' => 'web'])->getDisplay());
+
+        // another option leaves it alone; a bad value names the option
+        self::assertSame(0, $this->cli('fleet:template:update', ['project' => 'blog', 'name' => 'web', '--tty1' => ['x']])->getStatusCode());
+        self::assertTrue($this->stored('blog', 'web')->hasMailpit());
+        $bad = $this->cli('fleet:template:update', ['project' => 'blog', 'name' => 'web', '--mailpit' => 'maybe']);
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertStringContainsString('--mailpit', $bad->getErrorOutput());
     }
 
     public function testSshKeyOptionStoresShowsAndUnsets(): void

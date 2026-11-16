@@ -34,6 +34,7 @@ final class Shapes
             'ssh_keys' => $template->sshKeys(),
             'ssh_identities' => $template->sshIdentities()->value,
             'database' => $template->hasDatabase(),
+            'mailpit' => $template->hasMailpit(),
             'agent' => $template->isAgent(),
             'cpu_threads' => $template->cpuThreads(),
             'slots' => $template->slots(),

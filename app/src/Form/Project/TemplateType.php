@@ -88,6 +88,11 @@ final class TemplateType extends AbstractType
                 'required' => false,
                 'help' => 'Untick for a template without a database service (for example a dispatched agent). Fleet then exports FLEET_HAS_DB=0 and a poisoned DB_HOST, so a tool never falls back to the generic `db` host of another project.',
             ])
+            ->add('mailpit', CheckboxType::class, [
+                'label' => 'Mailpit',
+                'required' => false,
+                'help' => 'Expose this instance\'s Mailpit at https://mailpit--<instance>.<domain>, behind the same sign-in as the instance.',
+            ])
             ->add('agent', CheckboxType::class, [
                 'label' => 'An AI agent works in these instances',
                 'required' => false,

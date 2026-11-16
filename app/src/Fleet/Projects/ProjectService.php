@@ -275,7 +275,7 @@ final readonly class ProjectService
             if ($input->name !== $existing->name()) {
                 $errors['name'] = 'The name cannot be changed.';
             }
-        } elseif (null !== $error = ResourceName::error($input->name)) {
+        } elseif (null !== $error = ResourceName::projectError($input->name)) {
             $errors['name'] = $error;
         } elseif (null !== $this->projects->findByName($input->name)) {
             $errors['name'] = 'A project with this name already exists.';

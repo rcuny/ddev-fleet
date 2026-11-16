@@ -25,6 +25,8 @@ final readonly class CaddyfileRenderer
     public const string AUTHELIA = '127.0.0.1:9091';
     /** ddev's shared router: plain HTTP on loopback, routing by Host (the instance sites proxy to it). */
     public const string DDEV_ROUTER_HOST = '127.0.0.1';
+    /** The router's Mailpit entry point (HTTP, loopback only; Caddy is the only way in, FLE-344). */
+    public const int DDEV_MAILPIT_PORT = 8025;
     public const string DDEV_ROUTER = self::DDEV_ROUTER_HOST.':8080';
 
     /** The identity headers the app trusts from Caddy (see RemoteUserAuthenticator). */

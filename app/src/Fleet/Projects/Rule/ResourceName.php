@@ -19,6 +19,12 @@ final class ResourceName
     /** `new` is the URL of the create page. */
     public const array RESERVED = ['new'];
 
+    /**
+     * Also refused for a project: `mailpit--<instance id>` is the host of an instance's Mailpit (FLE-344), so no
+     * instance id may start with `mailpit--`.
+     */
+    public const array PROJECT_RESERVED = ['new', 'mailpit'];
+
     private const string PATTERN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/D';
 
     /**
@@ -43,6 +49,16 @@ final class ResourceName
         }
 
         return null;
+    }
+
+    /** A project name: the general rules plus the names no instance id may start with. */
+    public static function projectError(mixed $name): ?string
+    {
+        if (null !== $error = self::error($name)) {
+            return $error;
+        }
+
+        return \in_array($name, self::PROJECT_RESERVED, true) ? 'This name is reserved.' : null;
     }
 
     /**

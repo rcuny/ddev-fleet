@@ -13,9 +13,9 @@ use App\Domain\Template\TemplateRepository;
 use App\Fleet\Ddev\DdevUnavailable;
 use App\Fleet\Instances\DeployInput;
 use App\Fleet\Instances\InstanceHostnames;
-use App\Fleet\Instances\InstanceIsolation;
 use App\Fleet\Instances\InstanceNaming;
 use App\Fleet\Instances\InstanceService;
+use App\Fleet\Instances\MailpitExposure;
 use App\Fleet\Instances\OperationOptions;
 use App\Fleet\Instances\Selector;
 use App\Fleet\Instances\VisibleInstances;
@@ -61,7 +61,7 @@ final class InstanceController extends AbstractController
         private readonly CurrentActor $actor,
         private readonly LiveFeedCookie $feedCookie,
         private readonly InstanceTopics $topics,
-        private readonly InstanceIsolation $isolation,
+        private readonly MailpitExposure $mailpit,
         private readonly LinkResolver $linkResolver,
     ) {
     }
@@ -244,7 +244,7 @@ final class InstanceController extends AbstractController
             'latest' => $jobs[0] ?? null,
             'canDestroy' => $this->isGranted(ProjectVoter::DESTROY, $instance->project()),
             'agentTemplate' => $this->templates->find($instance->project(), $instance->templateName())?->isAgent() ?? false,
-            'mailpit' => $this->isGranted(ProjectVoter::OPERATE, $instance->project()) ? $this->isolation->mailpitCredentials($id) : null,
+            'mailpit' => $this->mailpitView($instance),
         ]);
         if (null !== $active) {
             $this->feedCookie->attach($request, $response, ['/jobs/'.$active->id()]);
@@ -286,6 +286,27 @@ final class InstanceController extends AbstractController
     {
         if (!$this->isCsrfTokenValid('submit', (string) $request->request->get('_token'))) {
             throw $this->createAccessDeniedException('Invalid CSRF token.');
+        }
+    }
+
+    /**
+     * The Mail link of the detail page: the Mailpit URL when the template has it on and the host label fits, a notice when
+     * the id is too long for it, null otherwise (FLE-344). The page is already limited to people who can see the instance.
+     *
+     * @return array{url: string|null, notice: string|null}|null
+     */
+    private function mailpitView(Instance $instance): ?array
+    {
+        if (!$this->mailpit->enabled($instance, $instance->project())) {
+            return null;
+        }
+        if (!MailpitExposure::fits($instance->id())) {
+            return ['url' => null, 'notice' => \sprintf('Mailpit is not reachable from the browser: "%s%s" would be %d characters and a host name label has at most %d. Redeploy with a shorter label.', MailpitExposure::PREFIX, $instance->id(), \strlen(MailpitExposure::PREFIX.$instance->id()), InstanceNaming::DNS_LABEL_MAX)];
+        }
+        try {
+            return ['url' => $this->mailpit->url($instance->id()), 'notice' => null];
+        } catch (Refused) {
+            return null;
         }
     }
 

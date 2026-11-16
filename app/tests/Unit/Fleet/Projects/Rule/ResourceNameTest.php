@@ -44,6 +44,16 @@ final class ResourceNameTest extends TestCase
         }
     }
 
+    public function testMailpitIsReservedForProjectsOnly(): void
+    {
+        // `mailpit--<instance id>` is the host of an instance's Mailpit (FLE-344): no instance id may start with it
+        self::assertNotNull(ResourceName::projectError('mailpit'));
+        self::assertNotNull(ResourceName::projectError('new'));
+        self::assertNull(ResourceName::projectError('mailpit2'));
+        self::assertNull(ResourceName::projectError('my-mailpit'));
+        self::assertNull(ResourceName::error('mailpit'), 'a template or port may still be named mailpit');
+    }
+
     public function testTheReservedNameCanBeAllowedForLookups(): void
     {
         self::assertNotNull(ResourceName::error('new'));
