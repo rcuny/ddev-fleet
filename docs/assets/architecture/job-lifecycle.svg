@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 236" width="760" height="236" role="img" aria-labelledby="t d">
+<title id="t">Lifecycle of a job</title>
+<desc id="d">A trigger calls InstanceService, which stores a queued job and dispatches a RunJob message to the jobs transport. The worker consumes it and either re-queues it when the instance or all job slots are busy, or runs it, in a child process when concurrency is above one. The executor locks the instance, runs the job and writes a log file; Mercure tells the browser that the log grew.</desc>
+<style>
+svg{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.d-box{fill:#ffffff;stroke:#a1a1aa;stroke-width:1.25}
+.d-edge{fill:#f4f4f5;stroke:#18181b;stroke-width:1.5}
+.d-band{fill:#f4f4f5;stroke:#a1a1aa;stroke-width:1.25;stroke-dasharray:5 4}
+.d-t{font-size:13px;font-weight:600;fill:#18181b}
+.d-s{font-size:11px;fill:#52525b}
+.d-m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;fill:#52525b}
+.d-l{font-size:10.5px;font-weight:500;fill:#71717a}
+.d-line{fill:none;stroke:#71717a;stroke-width:1.5}
+.d-dash{stroke-dasharray:4 3}
+.d-head{fill:#71717a}
+.d-num{fill:#18181b}
+.d-numt{font-size:11px;font-weight:700;fill:#ffffff}
+.bg{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.d-box{fill:#18181b;stroke:#52525b;stroke-width:1.25}
+.d-edge{fill:#27272a;stroke:#f4f4f5;stroke-width:1.5}
+.d-band{fill:#101012;stroke:#52525b;stroke-width:1.25;stroke-dasharray:5 4}
+.d-t{font-size:13px;font-weight:600;fill:#f4f4f5}
+.d-s{font-size:11px;fill:#a1a1aa}
+.d-m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;fill:#a1a1aa}
+.d-l{font-size:10.5px;font-weight:500;fill:#a1a1aa}
+.d-line{fill:none;stroke:#a1a1aa;stroke-width:1.5}
+.d-dash{stroke-dasharray:4 3}
+.d-head{fill:#a1a1aa}
+.d-num{fill:#f4f4f5}
+.d-numt{font-size:11px;font-weight:700;fill:#09090b}
+.bg{fill:#09090b}
+}
+</style>
+<rect class="bg" x="0" y="0" width="760" height="236"/>
+<defs><marker id="a3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" class="d-head"/></marker></defs>
+
+<path d="M520 46C500 22 412 22 392 44" class="d-line d-dash" marker-end="url(#a3)"/>
+<text x="456" y="18" text-anchor="middle" class="d-l">busy: back on the queue with a delay</text>
+
+<rect x="6" y="48" width="132" height="70" rx="8" class="d-box"/>
+<text x="18" y="70" class="d-t">Trigger</text>
+<text x="18" y="87" class="d-s">UI · CLI · API</text>
+<text x="18" y="102" class="d-s">webhook · schedule</text>
+
+<rect x="160" y="48" width="132" height="70" rx="8" class="d-box"/>
+<text x="172" y="70" class="d-t">InstanceService</text>
+<text x="172" y="87" class="d-s">job row: queued</text>
+<text x="172" y="102" class="d-s">dispatch RunJob(id)</text>
+
+<rect x="314" y="48" width="132" height="70" rx="8" class="d-box"/>
+<text x="326" y="70" class="d-t">jobs transport</text>
+<text x="326" y="87" class="d-m">queue.sqlite</text>
+<text x="326" y="102" class="d-s">one consumer</text>
+
+<rect x="468" y="48" width="132" height="70" rx="8" class="d-box"/>
+<text x="480" y="70" class="d-t">fleet-worker@1</text>
+<text x="480" y="87" class="d-s">ConcurrentJobRunner</text>
+<text x="480" y="102" class="d-s" style="font-size:10px">free slot? same instance?</text>
+
+<rect x="622" y="48" width="132" height="70" rx="8" class="d-edge"/>
+<text x="634" y="70" class="d-t">JobExecutor</text>
+<text x="634" y="87" class="d-s">lock, claim: running</text>
+<text x="634" y="102" class="d-s">run type, final status</text>
+
+<path d="M140 83H157" class="d-line" marker-end="url(#a3)"/>
+<path d="M294 83H311" class="d-line" marker-end="url(#a3)"/>
+<path d="M448 83H465" class="d-line" marker-end="url(#a3)"/>
+<path d="M602 83H619" class="d-line" marker-end="url(#a3)"/>
+
+<path d="M688 120V160" class="d-line" marker-end="url(#a3)"/>
+<rect x="622" y="162" width="132" height="60" rx="8" class="d-box"/>
+<text x="634" y="184" class="d-t">Job log file</text>
+<text x="634" y="201" class="d-s">append-only, masked</text>
+
+<path d="M620 192H603" class="d-line" marker-end="url(#a3)"/>
+<rect x="468" y="162" width="132" height="60" rx="8" class="d-box"/>
+<text x="480" y="184" class="d-t">Mercure</text>
+<text x="480" y="201" class="d-s">"job 7 changed"</text>
+
+<path d="M466 192H449" class="d-line" marker-end="url(#a3)"/>
+<rect x="314" y="162" width="132" height="60" rx="8" class="d-box"/>
+<text x="326" y="184" class="d-t">Browser job page</text>
+<text x="326" y="201" class="d-m">GET /jobs/7/log</text>
+
+<text x="6" y="184" class="d-l">Job status</text>
+<text x="6" y="201" class="d-m">queued → running →</text>
+<text x="6" y="216" class="d-m">succeeded | failed | interrupted</text>
+</svg>

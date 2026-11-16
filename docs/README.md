@@ -20,7 +20,7 @@ Find the shortest path to what you want to do. Pick a journey below, or scan the
 
 **Concepts**
 - [Concepts](concepts.md): the ten things to know.
-- [Architecture tour](../ARCHITECTURE.html): a 10-minute tour of how Fleet works, for developers (open it in a browser).
+- [Architecture tour](../ARCHITECTURE.md) (also as [HTML](../ARCHITECTURE.html)): a 10-minute tour of how Fleet works, for developers.
 
 **Guides** ([index](guides/README.md))
 - [Install](guides/01-install.md): installer, wizard, first sign-in.
