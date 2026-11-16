@@ -357,4 +357,132 @@ final class TmuxTest extends TestCase
             self::assertStringContainsString('duplicate window', $e->getMessage());
         }
     }
+
+    private const string DDEV_CMD = "ddev\0exec\0claude\0--model\0sonnet\0/jira work OWA-123\0--allow-dangerously-skip-permissions\0";
+
+    private const string PS_CLAUDE = "    1     0     1     -1 ?        init         /sbin/init\n"
+        ."   1953     0  1953  1953 pts/0    bash         bash -c set -eu && ( claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions )\n"
+        ."   1959  1953  1953  1953 pts/0    claude       claude --model sonnet /jira work OWA-123 --allow-dangerously-skip-permissions\n";
+
+    private function paneWindow(): void
+    {
+        $this->runner->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\n".self::ID."\n"));
+        $this->runner->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, self::pane('%7', 0, 50, 'sidebar').self::pane('%5', 51, 74).self::pane('%6', 126, 74)));
+    }
+
+    /** One look at a pane running `ddev` on the host: display-message, /proc stat and cmdline, then the container's ps. */
+    private function ddevPane(string $cmdline, CommandResult $ps): void
+    {
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tddev\t0\t2303527\n"));
+        $this->runner->expect(['cat', '/proc/2303527/stat'], new CommandResult(0, "2303527 (ba sh) S 2303500 2303527 2303527 34817 2303560 4194560 1 0\n"));
+        $this->runner->expect(['cat', '/proc/2303560/cmdline'], new CommandResult(0, $cmdline));
+        $this->runner->expect(['docker', 'exec'], $ps);
+    }
+
+    public function testAgentPaneAcceptsNativeClaude(): void
+    {
+        $this->paneWindow();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tclaude\t0\t99\n"));
+
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+
+        self::assertNotNull($pane);
+        self::assertTrue($pane->isAgent());
+        self::assertSame([], $this->runner->callsMatching(['docker']));
+    }
+
+    public function testAgentPaneAcceptsDdevExecClaudeWhenTheContainerSessionRunsClaude(): void
+    {
+        $this->paneWindow();
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, self::PS_CLAUDE));
+
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+
+        self::assertNotNull($pane);
+        self::assertTrue($pane->isAgent());
+        self::assertSame('ddev>claude', $pane->command);
+        self::assertSame(['docker', 'exec', 'ddev-acme--dev-web', 'ps', '-eo', 'pid=,ppid=,pgid=,tpgid=,tty=,comm=,args='], $this->runner->callsMatching(['docker'])[0]->argv);
+    }
+
+    public function testDdevExecWhoseForegroundLeafIsAShellIsRefused(): void
+    {
+        $this->paneWindow();
+        $ps = "   1953     0  1953  1953 pts/0    bash         bash -c set -eu && ( claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions )\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+
+        self::assertNotNull($pane);
+        self::assertFalse($pane->isAgent());
+    }
+
+    public function testTwoMatchingContainerSessionsAreRefused(): void
+    {
+        $this->paneWindow();
+        $second = "   2001     0  2001  2001 pts/1    bash         bash -c claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions\n"
+            ."   2002  2001  2001  2001 pts/1    claude       claude --model sonnet /jira work OWA-123 --allow-dangerously-skip-permissions\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, self::PS_CLAUDE.$second));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function nonAgentDdevCommands(): iterable
+    {
+        yield 'ddev ssh' => ["ddev\0ssh\0"];
+        yield 'ddev exec bash' => ["ddev\0exec\0bash\0"];
+        yield 'unknown flag' => ["ddev\0exec\0--evil\0claude\0--model\0sonnet\0/jira work OWA-123\0--allow-dangerously-skip-permissions\0"];
+        yield 'no command' => ["ddev\0exec\0"];
+        yield 'not ddev' => ["docker\0exec\0claude\0"];
+    }
+
+    #[DataProvider('nonAgentDdevCommands')]
+    public function testOtherDdevCommandsAreRefused(string $cmdline): void
+    {
+        $this->paneWindow();
+        $this->ddevPane($cmdline, new CommandResult(0, self::PS_CLAUDE));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testDockerExecFailureFailsClosed(): void
+    {
+        $this->paneWindow();
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(1, '', 'no such container'));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testServiceFlagSelectsTheContainer(): void
+    {
+        $this->paneWindow();
+        $this->ddevPane("ddev\0exec\0-s\0db\0claude\0--model\0sonnet\0/jira work OWA-123\0--allow-dangerously-skip-permissions\0", new CommandResult(0, self::PS_CLAUDE));
+
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+
+        self::assertTrue($pane?->isAgent());
+        self::assertSame('ddev-acme--dev-db', $this->runner->callsMatching(['docker'])[0]->argv[2]);
+    }
+
+    public function testSendToAgentRefusesBeforeEnterWhenTheContainerForegroundBecameAShell(): void
+    {
+        $this->paneWindow();
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, self::PS_CLAUDE));
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+        self::assertNotNull($pane);
+        // First re-check: still claude. Second (before Enter): the claude process is gone, a shell is left.
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, self::PS_CLAUDE));
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, "   1953     0  1953  1953 pts/0    bash         bash -c claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions\n"));
+
+        try {
+            $this->tmux->sendToAgent(self::ID, $pane, 'hello', true);
+            self::fail('Enter must not be sent.');
+        } catch (WorkspaceException) {
+        }
+
+        self::assertCount(1, $this->tmuxCalls('send-keys'));
+        self::assertSame('hello', $this->tmuxCalls('send-keys')[0][8]);
+    }
 }

@@ -44,6 +44,9 @@ final readonly class Tmux
     /** The only foreground commands API terminal input may reach (FLE-286): the agent, never a shell or any other program. */
     public const array AGENTS = ['claude'];
 
+    /** The timeout of the `docker exec ... ps` that looks inside an instance container (FLE-352). */
+    private const float DOCKER_TIMEOUT = 8.0;
+
     /** Foreground commands that mean "a shell at its prompt". */
     private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', '-bash', '-sh', '-zsh'];
 
@@ -298,7 +301,9 @@ final readonly class Tmux
             return null;
         }
 
-        return new AgentPane($target->id, $state['command']);
+        $effective = $this->effectiveForeground($instanceId, $state);
+
+        return new AgentPane($target->id, $effective['display'] ?? $state['command'], $effective['command'] ?? null);
     }
 
     /**
@@ -316,7 +321,7 @@ final readonly class Tmux
             throw new WorkspaceException('The text is empty, too long, or contains a control character.');
         }
         $state = $this->paneState($pane->id);
-        if (null === $state || $state['window'] !== $instanceId || $state['dead'] || !\in_array($state['command'], self::AGENTS, true)) {
+        if (null === $state || $state['window'] !== $instanceId || $state['dead'] || null === $this->effectiveForeground($instanceId, $state)) {
             throw new WorkspaceException('The pane is no longer running an agent.');
         }
 
@@ -324,7 +329,7 @@ final readonly class Tmux
         if ($enter) {
             // Again between the text and Enter: if the agent is gone, the text is left unsubmitted rather than run by a shell.
             $after = $this->paneState($pane->id);
-            if (null === $after || $after['window'] !== $instanceId || $after['dead'] || !\in_array($after['command'], self::AGENTS, true)) {
+            if (null === $after || $after['window'] !== $instanceId || $after['dead'] || null === $this->effectiveForeground($instanceId, $after)) {
                 throw new WorkspaceException('The pane stopped running an agent before Enter; Enter was not sent.');
             }
             $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter');
@@ -332,23 +337,184 @@ final readonly class Tmux
     }
 
     /**
-     * @return array{window: string, command: string, dead: bool}|null
+     * @return array{window: string, command: string, dead: bool, pid: string}|null
      */
     private function paneState(string $paneId): ?array
     {
         if (1 !== preg_match('/^%[0-9]{1,9}$/D', $paneId)) {
             return null;
         }
-        $result = $this->tmux(['display-message', '-p', '-t', $paneId, "#{window_name}\t#{pane_current_command}\t#{pane_dead}"]);
+        $result = $this->tmux(['display-message', '-p', '-t', $paneId, "#{window_name}\t#{pane_current_command}\t#{pane_dead}\t#{pane_pid}"]);
         if (!$result->isSuccess()) {
             return null;
         }
-        $f = explode("\t", rtrim($result->stdout, "\r\n"), 3);
-        if (3 !== \count($f) || '' === $f[0]) {
+        $f = array_pad(explode("\t", rtrim($result->stdout, "\r\n"), 4), 4, '');
+        if ('' === $f[0]) {
             return null;
         }
 
-        return ['window' => $f[0], 'command' => $f[1], 'dead' => '1' === $f[2]];
+        return ['window' => $f[0], 'command' => $f[1], 'dead' => '1' === $f[2], 'pid' => $f[3]];
+    }
+
+    /**
+     * What the pane runs as far as the agent gate is concerned (FLE-352), or null when it is not an agent. A host foreground
+     * command in AGENTS counts as it is. `ddev` (an agent started with `ddev exec claude ...`, which is what a Fleet agent pane
+     * runs) is looked through: the instance container's terminal session must be exactly one, matching the host command, whose
+     * foreground leaf processes are all agents. Everything else, and any failure, is null (fail closed).
+     *
+     * @param array{window: string, command: string, dead: bool, pid: string} $state
+     *
+     * @return array{command: string, display: string}|null
+     */
+    private function effectiveForeground(string $instanceId, array $state): ?array
+    {
+        if (\in_array($state['command'], self::AGENTS, true)) {
+            return ['command' => $state['command'], 'display' => $state['command']];
+        }
+        if ('ddev' !== $state['command']) {
+            return null;
+        }
+        try {
+            $exec = $this->hostDdevExec($state['pid']);
+            if (null === $exec) {
+                return null;
+            }
+            $command = $this->containerForeground($instanceId, $exec['service'], $exec['command']);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null === $command ? null : ['command' => $command, 'display' => 'ddev>'.$command];
+    }
+
+    /**
+     * The `ddev exec [flags] <cmd...>` the pane's foreground process group runs on the host: its service and its command words.
+     * Only a small list of flags is understood; any other flag, or any other ddev command, is null.
+     *
+     * @return array{service: string, command: list<string>}|null
+     */
+    private function hostDdevExec(string $panePid): ?array
+    {
+        if (1 !== preg_match('/^[0-9]{1,9}$/D', $panePid)) {
+            return null;
+        }
+        $stat = $this->runner->run(['cat', '/proc/'.$panePid.'/stat'], null, [], null, self::TIMEOUT);
+        // "pid (comm) state ppid pgrp session tty_nr tpgid ..."; comm may hold spaces and parentheses, so cut at the last ")".
+        $close = strrpos($stat->stdout, ')');
+        if (!$stat->isSuccess() || false === $close) {
+            return null;
+        }
+        $rest = preg_split('/\s+/', trim(substr($stat->stdout, $close + 1))) ?: [];
+        $tpgid = $rest[5] ?? '';
+        if (1 !== preg_match('/^[1-9][0-9]{0,8}$/D', $tpgid)) {
+            return null;
+        }
+        $cmdline = $this->runner->run(['cat', '/proc/'.$tpgid.'/cmdline'], null, [], null, self::TIMEOUT);
+        if (!$cmdline->isSuccess()) {
+            return null;
+        }
+        $argv = explode("\0", rtrim($cmdline->stdout, "\0"));
+        if (\count($argv) < 3 || 'ddev' !== basename($argv[0]) || 'exec' !== $argv[1]) {
+            return null;
+        }
+        $service = 'web';
+        for ($i = 2, $n = \count($argv); $i < $n; ++$i) {
+            $arg = $argv[$i];
+            if ('--' === $arg) {
+                ++$i;
+                break;
+            }
+            if (!str_starts_with($arg, '-')) {
+                break;
+            }
+            if ('--raw' === $arg) {
+                continue;
+            }
+            if (1 === preg_match('/^(?:-s|--service|-d|--dir)$/D', $arg)) {
+                if (!isset($argv[$i + 1])) {
+                    return null;
+                }
+                $value = $argv[++$i];
+            } elseif (1 === preg_match('/^(--service|--dir)=(.*)$/Ds', $arg, $m)) {
+                $arg = $m[1];
+                $value = $m[2];
+            } else {
+                return null;
+            }
+            if ('-s' === $arg || '--service' === $arg) {
+                $service = $value;
+            }
+        }
+        $command = \array_slice($argv, $i);
+        // The command being run must itself be an agent: `ddev exec bash` never passes, whatever the container shows.
+        if ([] === $command || !\in_array(basename($command[0]), self::AGENTS, true) || 1 !== preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]*$/D', $service)) {
+            return null;
+        }
+
+        return ['service' => $service, 'command' => $command];
+    }
+
+    /**
+     * Looks into the container `ddev-<instance>-<service>`: the terminal sessions are the processes with a tty whose parent is 0
+     * (PID 1 is the container init). Exactly one must carry the host command in its arguments; its tty's foreground process
+     * group must have at least one leaf (a member without a child in the group) and every leaf must be an agent.
+     *
+     * @param list<string> $hostCommand
+     */
+    private function containerForeground(string $instanceId, string $service, array $hostCommand): ?string
+    {
+        $needle = self::normalise(implode(' ', $hostCommand));
+        if ('' === $needle) {
+            return null;
+        }
+        $result = $this->runner->run(
+            ['docker', 'exec', 'ddev-'.$instanceId.'-'.$service, 'ps', '-eo', 'pid=,ppid=,pgid=,tpgid=,tty=,comm=,args='],
+            null,
+            [],
+            null,
+            self::DOCKER_TIMEOUT,
+        );
+        if (!$result->isSuccess()) {
+            return null;
+        }
+        $procs = [];
+        foreach (preg_split('/\R/', $result->stdout) ?: [] as $line) {
+            if (1 === preg_match('/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(\S+)\s+(\S+)\s*(.*)$/Ds', $line, $m)) {
+                $procs[] = ['pid' => (int) $m[1], 'ppid' => (int) $m[2], 'pgid' => (int) $m[3], 'tpgid' => (int) $m[4], 'tty' => $m[5], 'comm' => $m[6], 'args' => self::normalise($m[7])];
+            }
+        }
+        $sessions = array_values(array_filter(
+            $procs,
+            static fn (array $p): bool => 0 === $p['ppid'] && 1 !== $p['pid'] && '?' !== $p['tty'] && str_contains($p['args'], $needle),
+        ));
+        if (1 !== \count($sessions) || $sessions[0]['tpgid'] <= 0) {
+            return null;
+        }
+        $session = $sessions[0];
+        $group = array_values(array_filter(
+            $procs,
+            static fn (array $p): bool => $p['pgid'] === $session['tpgid'] && $p['tty'] === $session['tty'],
+        ));
+        $parents = array_column($group, 'ppid');
+        $leaves = array_filter($group, static fn (array $p): bool => !\in_array($p['pid'], $parents, true));
+        if ([] === $leaves) {
+            return null;
+        }
+        $command = null;
+        foreach ($leaves as $leaf) {
+            if (!\in_array($leaf['comm'], self::AGENTS, true)) {
+                return null;
+            }
+            $command = $leaf['comm'];
+        }
+
+        return $command;
+    }
+
+    /** Quotes removed and whitespace collapsed, so a command typed on the host compares with the same one inside a `bash -c`. */
+    private static function normalise(string $s): string
+    {
+        return trim((string) preg_replace('/\s+/', ' ', str_replace(["'", '"'], '', $s)));
     }
 
     /**
