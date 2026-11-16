@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 512" width="760" height="512" role="img" aria-labelledby="t d">
+<title id="t">Runtime architecture of a Fleet host</title>
+<desc id="d">Caddy is the only public process. It asks Authelia to authenticate, serves the Symfony app through php-fpm, proxies the Mercure hub and forwards instance hostnames to the DDEV router. The app and the systemd workers share FLEET_HOME with its two SQLite databases. The worker runs ddev and git against Docker, where each instance is a DDEV project.</desc>
+<style>
+svg{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.d-box{fill:#ffffff;stroke:#a1a1aa;stroke-width:1.25}
+.d-edge{fill:#f4f4f5;stroke:#18181b;stroke-width:1.5}
+.d-band{fill:#f4f4f5;stroke:#a1a1aa;stroke-width:1.25;stroke-dasharray:5 4}
+.d-t{font-size:13px;font-weight:600;fill:#18181b}
+.d-s{font-size:11px;fill:#52525b}
+.d-m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;fill:#52525b}
+.d-l{font-size:10.5px;font-weight:500;fill:#71717a}
+.d-line{fill:none;stroke:#71717a;stroke-width:1.5}
+.d-dash{stroke-dasharray:4 3}
+.d-head{fill:#71717a}
+.d-num{fill:#18181b}
+.d-numt{font-size:11px;font-weight:700;fill:#ffffff}
+.bg{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.d-box{fill:#18181b;stroke:#52525b;stroke-width:1.25}
+.d-edge{fill:#27272a;stroke:#f4f4f5;stroke-width:1.5}
+.d-band{fill:#101012;stroke:#52525b;stroke-width:1.25;stroke-dasharray:5 4}
+.d-t{font-size:13px;font-weight:600;fill:#f4f4f5}
+.d-s{font-size:11px;fill:#a1a1aa}
+.d-m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;fill:#a1a1aa}
+.d-l{font-size:10.5px;font-weight:500;fill:#a1a1aa}
+.d-line{fill:none;stroke:#a1a1aa;stroke-width:1.5}
+.d-dash{stroke-dasharray:4 3}
+.d-head{fill:#a1a1aa}
+.d-num{fill:#f4f4f5}
+.d-numt{font-size:11px;font-weight:700;fill:#09090b}
+.bg{fill:#09090b}
+}
+</style>
+<rect class="bg" x="0" y="0" width="760" height="512"/>
+<defs><marker id="a1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" class="d-head"/></marker></defs>
+
+<text x="380" y="16" text-anchor="middle" class="d-l">Internet · :80 / :443 (+ named ports)</text>
+<path d="M380 22V44" class="d-line" marker-end="url(#a1)"/>
+
+<rect x="20" y="46" width="720" height="54" rx="8" class="d-edge"/>
+<text x="380" y="69" text-anchor="middle" class="d-t">Caddy</text>
+<text x="380" y="87" text-anchor="middle" class="d-s">the only public process · TLS for every hostname · sign-in gate · reverse proxy</text>
+
+<path d="M100 100V138" class="d-line" marker-end="url(#a1)"/>
+<text x="107" y="124" class="d-l">forward_auth</text>
+<path d="M325 100V138" class="d-line" marker-end="url(#a1)"/>
+<text x="332" y="124" class="d-l">FastCGI</text>
+<path d="M540 100V138" class="d-line" marker-end="url(#a1)"/>
+<text x="547" y="124" class="d-l">SSE</text>
+
+<rect x="20" y="140" width="160" height="66" rx="8" class="d-box"/>
+<text x="34" y="162" class="d-t">Authelia</text>
+<text x="34" y="179" class="d-m">127.0.0.1:9091</text>
+<text x="34" y="194" class="d-s">auth.&lt;domain&gt; login</text>
+
+<rect x="195" y="140" width="260" height="66" rx="8" class="d-box"/>
+<text x="209" y="162" class="d-t">php-fpm · Symfony app</text>
+<text x="209" y="179" class="d-m">/run/php/fleet.sock</text>
+<text x="209" y="194" class="d-s">UI · /api/v1 · /hooks · queues jobs</text>
+
+<rect x="470" y="140" width="140" height="66" rx="8" class="d-box"/>
+<text x="484" y="162" class="d-t">Mercure hub</text>
+<text x="484" y="179" class="d-m">127.0.0.1:3000</text>
+<text x="484" y="194" class="d-s">live wake-ups</text>
+
+<path d="M716 100V436" class="d-line" marker-end="url(#a1)"/>
+<text x="709" y="176" text-anchor="end" class="d-l">*.&lt;domain&gt;</text>
+<text x="709" y="396" text-anchor="end" class="d-l">plain HTTP · 127.0.0.1:8080</text>
+
+<path d="M250 206V244" class="d-line" marker-end="url(#a1)"/>
+<text x="257" y="230" class="d-l">Doctrine</text>
+
+<rect x="20" y="246" width="290" height="120" rx="8" class="d-box"/>
+<text x="34" y="268" class="d-t">FLEET_HOME · /srv/fleet</text>
+<text x="34" y="289" class="d-m">var/fleet.sqlite   state, source of truth</text>
+<text x="34" y="306" class="d-m">var/queue.sqlite   Messenger queue</text>
+<text x="34" y="323" class="d-m">logs/  locks/  slots/  backups/</text>
+<text x="34" y="340" class="d-m">assets/  instances/  keys/  ssh/</text>
+<text x="34" y="357" class="d-s">one directory, owned by the fleet user</text>
+
+<rect x="350" y="246" width="168" height="54" rx="8" class="d-box"/>
+<text x="362" y="268" class="d-t">fleet-scheduler</text>
+<text x="362" y="285" class="d-s">ticks every 30 s</text>
+<rect x="527" y="246" width="168" height="54" rx="8" class="d-box"/>
+<text x="539" y="268" class="d-t">fleet-status</text>
+<text x="539" y="285" class="d-s">watches every 10 s</text>
+<rect x="350" y="312" width="168" height="54" rx="8" class="d-box"/>
+<text x="362" y="334" class="d-t">fleet-worker@1</text>
+<text x="362" y="351" class="d-m">messenger:consume jobs</text>
+<rect x="527" y="312" width="168" height="54" rx="8" class="d-box"/>
+<text x="539" y="334" class="d-t">fleet-tmux</text>
+<text x="539" y="351" class="d-s">one window per instance</text>
+
+<path d="M348 339H313" class="d-line" marker-end="url(#a1)" marker-start="url(#a1)"/>
+<path d="M434 366V408" class="d-line" marker-end="url(#a1)"/>
+<text x="441" y="392" class="d-l">ddev · git</text>
+
+<rect x="20" y="410" width="720" height="92" rx="8" class="d-band"/>
+<text x="34" y="428" class="d-l">Docker · one DDEV project per instance · containers sit under fleet.slice</text>
+<rect x="36" y="438" width="150" height="50" rx="8" class="d-box"/>
+<text x="48" y="459" class="d-t">myproject--main</text>
+<text x="48" y="476" class="d-s">web · db · add-ons</text>
+<rect x="198" y="438" width="150" height="50" rx="8" class="d-box"/>
+<text x="210" y="459" class="d-t">myproject--fix-12</text>
+<text x="210" y="476" class="d-s">web · db · add-ons</text>
+<rect x="360" y="438" width="150" height="50" rx="8" class="d-box"/>
+<text x="372" y="459" class="d-t">other--main</text>
+<text x="372" y="476" class="d-s">web · db · add-ons</text>
+<path d="M538 463H513" class="d-line" marker-end="url(#a1)"/>
+<rect x="540" y="438" width="188" height="50" rx="8" class="d-box"/>
+<text x="552" y="459" class="d-t">ddev-router (Traefik)</text>
+<text x="552" y="476" class="d-s">routes by Host header, no TLS</text>
+</svg>

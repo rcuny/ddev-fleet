@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200" width="760" height="200" role="img" aria-labelledby="t d">
+<title id="t">Request path from the browser to an instance</title>
+<desc id="d">The browser reaches Caddy over HTTPS. Caddy sends a sub-request to Authelia, then forwards the request over plain HTTP to the DDEV router on loopback, which picks the instance by its Host header.</desc>
+<style>
+svg{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.d-box{fill:#ffffff;stroke:#a1a1aa;stroke-width:1.25}
+.d-edge{fill:#f4f4f5;stroke:#18181b;stroke-width:1.5}
+.d-band{fill:#f4f4f5;stroke:#a1a1aa;stroke-width:1.25;stroke-dasharray:5 4}
+.d-t{font-size:13px;font-weight:600;fill:#18181b}
+.d-s{font-size:11px;fill:#52525b}
+.d-m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;fill:#52525b}
+.d-l{font-size:10.5px;font-weight:500;fill:#71717a}
+.d-line{fill:none;stroke:#71717a;stroke-width:1.5}
+.d-dash{stroke-dasharray:4 3}
+.d-head{fill:#71717a}
+.d-num{fill:#18181b}
+.d-numt{font-size:11px;font-weight:700;fill:#ffffff}
+.bg{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.d-box{fill:#18181b;stroke:#52525b;stroke-width:1.25}
+.d-edge{fill:#27272a;stroke:#f4f4f5;stroke-width:1.5}
+.d-band{fill:#101012;stroke:#52525b;stroke-width:1.25;stroke-dasharray:5 4}
+.d-t{font-size:13px;font-weight:600;fill:#f4f4f5}
+.d-s{font-size:11px;fill:#a1a1aa}
+.d-m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;fill:#a1a1aa}
+.d-l{font-size:10.5px;font-weight:500;fill:#a1a1aa}
+.d-line{fill:none;stroke:#a1a1aa;stroke-width:1.5}
+.d-dash{stroke-dasharray:4 3}
+.d-head{fill:#a1a1aa}
+.d-num{fill:#f4f4f5}
+.d-numt{font-size:11px;font-weight:700;fill:#09090b}
+.bg{fill:#09090b}
+}
+</style>
+<rect class="bg" x="0" y="0" width="760" height="200"/>
+<defs><marker id="a2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" class="d-head"/></marker></defs>
+
+<rect x="20" y="24" width="150" height="66" rx="8" class="d-box"/>
+<text x="34" y="48" class="d-t">Browser</text>
+<text x="34" y="65" class="d-s">https://myproject--main</text>
+<text x="34" y="79" class="d-s">.&lt;domain&gt;</text>
+
+<rect x="210" y="24" width="150" height="66" rx="8" class="d-edge"/>
+<text x="224" y="48" class="d-t">Caddy :443</text>
+<text x="224" y="65" class="d-s">TLS, instance site block,</text>
+<text x="224" y="79" class="d-s">group check</text>
+
+<rect x="400" y="24" width="150" height="66" rx="8" class="d-box"/>
+<text x="414" y="48" class="d-t">ddev-router</text>
+<text x="414" y="65" class="d-m">127.0.0.1:8080</text>
+<text x="414" y="79" class="d-s">routes by Host</text>
+
+<rect x="590" y="24" width="150" height="66" rx="8" class="d-box"/>
+<text x="604" y="48" class="d-t">Instance</text>
+<text x="604" y="65" class="d-s">web container of</text>
+<text x="604" y="79" class="d-s">myproject--main</text>
+
+<rect x="210" y="134" width="150" height="52" rx="8" class="d-box"/>
+<text x="224" y="157" class="d-t">Authelia</text>
+<text x="224" y="174" class="d-s">session cookie → groups</text>
+
+<path d="M172 57H207" class="d-line" marker-end="url(#a2)"/>
+<path d="M285 92V131" class="d-line" marker-end="url(#a2)" marker-start="url(#a2)"/>
+<path d="M362 57H397" class="d-line" marker-end="url(#a2)"/>
+<path d="M552 57H587" class="d-line" marker-end="url(#a2)"/>
+
+<circle cx="190" cy="40" r="9" class="d-num"/><text x="190" y="44" text-anchor="middle" class="d-numt">1</text>
+<circle cx="305" cy="112" r="9" class="d-num"/><text x="305" y="116" text-anchor="middle" class="d-numt">2</text>
+<circle cx="380" cy="40" r="9" class="d-num"/><text x="380" y="44" text-anchor="middle" class="d-numt">3</text>
+<circle cx="570" cy="40" r="9" class="d-num"/><text x="570" y="44" text-anchor="middle" class="d-numt">4</text>
+</svg>
