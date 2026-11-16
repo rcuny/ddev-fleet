@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-16
+
+### Added
+- **FLE-344: an instance's Mailpit is reachable at `mailpit--<instance>.<domain>` (template opt-in)**
+  - New template option **Mailpit** (default off; checkbox after "Instances have a database", `--mailpit=yes|no`, part of project export and import). With it on, Caddy serves the instance's Mailpit behind the same sign-in and project check as the instance (both TLS modes), with Mailpit's own login added upstream so you sign in once. The instance page shows an **Open Mailpit** link in place of the Mailpit login row.
+  - The project name `mailpit` is reserved. An instance id too long for the `mailpit--` host label gets no route and a notice on the instance page.
+
+### Fixed
+- **FLE-340:** `fleet host:isolation:check` no longer reports a declared link as blocked in isolation mode off (the link network does not exist yet); the link probe only reports there.
+
+- **FLE-342: the installer waits for cloud-init on a fresh VM.** Stage 1 and the shared apt helper wait for
+  `cloud-init status --wait` (at most `FLEET_CLOUD_INIT_WAIT` seconds, default 600) before the first apt call, and stage 1
+  retries `apt-get update` like stage 2 does. Before, `curl | bash` started right after boot failed in two seconds on
+  the apt lists lock (exit 100). `FLEET_CLOUD_INIT_WAIT=0` skips the wait; it happens once per install, and the DigitalOcean first-boot script sets it because it runs inside cloud-init.
+  Stage 1 retries `apt-get update` only when it failed on a lock.
+- **FLE-343: router static file push is atomic, the original backup is protected, the follow-up passes are tested and reported**
+  - The router's static configuration is replaced by a rename in its own directory (temp file, then `mv`), not by `cat >` over it; the in-place write stays only as a fallback for a path that cannot be renamed over.
+  - An existing backup of the router's original static file is kept unless the Traefik API shows the router healthy, so a failed rollback followed by a later change can no longer turn a bad merged file into "the original".
+  - `fleet port:refresh` prints (and fails on) a failed follow-up isolation pass instead of swallowing it; `host:isolation:enable` reports the pass result it gets back.
+  - New tests: the follow-up passes of both commands, `IsolationConverger::routerMirror` (report and enforce to report), the atomic write, the backup edge and a restore that checks the backup content.
+
+### Security
+- **FLE-336: in isolation `enforce` mode an instance can no longer reach another instance through the `:443` site mirror either (the part of FLE-326 that was split off).** The mirror passes TLS through by SNI and re-enters `ddev-router` from the loopback, so the router lost the caller. The mirror now sends a PROXY protocol v2 header and the router's https entry point trusts it from `127.0.0.1` only, so the per-instance deny routers (and the mirror's own SNI allow routers) see the real client: an instance's own name answers on `:443`, another instance's name is refused with every SNI and `Host` variant. In `off` and `report` the mirror and the router's static configuration stay exactly as before.
+
+### Dependencies
+- phpunit/phpunit ^13.4.7 (dev tooling, Renovate, FLE-10, #310).
+
+#### Rollout
+- Upgrade from v1.12.0 needs no instance restart and `:443` keeps working at every moment. Nothing changes until isolation is switched to `enforce` (`fleet host:isolation:enable --mode=enforce`).
+- Enabling `enforce` pushes the mirror's static and dynamic files into `ddev-router` and **restarts the router once** (every instance blinks for a few seconds; the command says so). The `:443` mirror sends the PROXY header only after the Traefik API shows that the router's live configuration trusts it. If the push or the restart fails, the mirror keeps working without the header, isolation is not enforced on `:443`, and the failure is reported loudly; run `fleet port:refresh` to retry.
+- The router's static file is saved first (inside the router as `<file>.fleet-backup` and on the host as `~fleet/.ddev/traefik/.fleet-router-static.backup`) and the merge must keep every original key. After the one restart Fleet checks the container, the Traefik API and a real request through `:8080` to a running instance; if any fails it restores the original, restarts again and reports it loudly (the mirror stays without PROXY).
+- `off` and `report` never push the router's static file or restart the router (`fleet port:refresh` and the installer only report a difference there); the isolation pass never pushes it in any mode.
+- Nothing waits for minutes any more: the router restart is bounded (45 s, health 30 s), the API and PROXY-trust waits take at most 45 s each, and `host:isolation:enable` / `fleet port:refresh` print what they are waiting for (`port:refresh` on stderr). A failed run ends with a clear result.
+- Degraded mode does not block `:443`: while the mirror has no PROXY header (the router does not trust it yet, or the API is unreachable) Fleet renders no SNI rules for `:443`, and with the API down and no earlier file the deny routers bind to DDEV's http and https entry points, never to the mirror, so an instance's own name keeps working over `:443`. Enabling re-renders the rules once PROXY is live.
+- Fixed a self-deadlock: `host:isolation:enable` held the `router-mirror` lock for the router restart and then waited about 300 s for a second grab of it by the isolation pass; the lock is now re-entrant within a process, so enable takes seconds plus the restart. `ci/isolation-check.sh` prints its usage and refuses instance ids.
+- `host:isolation:disable` rewrites the mirror without PROXY and pushes it to the router before it returns.
+- Switching back to `report` or `off` stops the header at once (no restart); the router keeps trusting the loopback until its next restart, which is harmless.
+- `host:isolation:check` compares the router's copies of the mirror files and the live PROXY trust with what Fleet wrote (match or mismatch, never unknown).
+
 ## [1.12.2] - 2026-11-16
 
 ### Added
@@ -1605,7 +1644,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.12.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/rcuny/ddev-fleet/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/rcuny/ddev-fleet/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/rcuny/ddev-fleet/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/rcuny/ddev-fleet/compare/v1.11.0...v1.12.0
