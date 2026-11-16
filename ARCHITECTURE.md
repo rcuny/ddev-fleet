@@ -4,7 +4,7 @@
 
 Last updated 2026-11-16 · Product repo root (Symfony app in `app/`)
 
-A styled version of this page: [ARCHITECTURE.html](ARCHITECTURE.html) (open it in a browser).
+A styled version of this page: [ARCHITECTURE.html](ARCHITECTURE.html) (open it in a browser, or see the [online preview](https://htmlpreview.github.io/?https://raw.githubusercontent.com/rcuny/ddev-fleet/refs/heads/main/ARCHITECTURE.html)).
 
 > **About this page:** a technical tour of Fleet 1.x for developers joining the project, written from the code on the product's `develop` branch (the latest `v1.*` tag is listed in `CHANGELOG.md`). Product scope is in [README.md](README.md) and [docs/concepts.md](docs/concepts.md); this page covers how the thing is built. When it and the code disagree, the code wins. The product's own docs are in [docs/](docs/README.md).
 
