@@ -12,6 +12,8 @@ You can **create instances manually** from the browser or the `fleet` command, o
 
 Each instance also gets its own window in a shared **tmux** workspace (see below), where you, a colleague or a coding agent such as Claude Code can interact with the instance to run CI scripts or do some actual development.
 
+**New to the code?** [ARCHITECTURE.html](ARCHITECTURE.html) is a 10-minute tour of how Fleet works: the stack, jobs and workers, the web UI, scheduling and webhooks. Open it in a browser.
+
 ## Philosophy and flavour
 
 Fleet is agnostic by design, it does not assume a stack or a tool. Run Drupal or any other DDEV project, use Claude or no agent at all, keep a human in the loop wherever you want one and automate the rest.
@@ -80,6 +82,7 @@ Caddy is the only Internet-facing process; Authelia handles sign-in. The Fleet a
 
 ## Documentation
 
+- [ARCHITECTURE.html](ARCHITECTURE.html): a 10-minute tour of how Fleet works (open it in a browser)
 - [Start here: the doc map](docs/README.md)
 - [Ten concepts in one page](docs/concepts.md)
 - [Install](docs/guides/01-install.md) and [your first project](docs/guides/02-first-project.md)
