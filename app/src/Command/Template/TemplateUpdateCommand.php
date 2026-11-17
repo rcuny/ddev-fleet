@@ -41,7 +41,8 @@ final class TemplateUpdateCommand extends Command
             $name = (string) $input->getArgument('name');
             $current = TemplateInput::fromTemplate($this->templates->get($project, $name));
             $template = $this->templates->update($project, $name, $current->with(TemplateOptions::changes($input, true)));
-            $out->emit($out->withWarning(Shapes::template($template), [] === ($w = SharedAgentCommands::forTemplate($template)) ? null : implode(' ', $w)), static function (JsonOutput $out) use ($template, $project): void {
+            $warnings = [...SharedAgentCommands::forTemplate($template), ...array_filter([$this->templates->takeWarning()])];
+            $out->emit($out->withWarning(Shapes::template($template), [] === $warnings ? null : implode(' ', $warnings)), static function (JsonOutput $out) use ($template, $project): void {
                 $out->success(\sprintf('Template "%s" of project "%s" updated.', $template->name(), $project));
             });
         });

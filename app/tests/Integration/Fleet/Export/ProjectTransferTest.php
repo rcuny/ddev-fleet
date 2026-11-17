@@ -170,6 +170,25 @@ final class ProjectTransferTest extends KernelTestCase
         self::assertFalse($this->decode($this->exporter()->export('blog', null, 'admin'))['templates'][0]['mailpit']);
     }
 
+    /**
+     * FLE-346: an import that turns Mailpit on for an existing project's template saves it; the Caddy sites follow after the
+     * commit (ProjectImporter::refresh(), not inside the transaction), and nothing fails when no instance has a site.
+     */
+    public function testAnImportThatChangesMailpitOnAnExistingProjectIsSavedWithoutWarnings(): void
+    {
+        $this->seedBlog();
+        $document = $this->decode($this->exporter()->export('blog', null, 'admin'));
+        $document['templates'][0]['mailpit'] = true;
+
+        $result = $this->importer()->apply($this->encode($document), null, 'admin');
+
+        self::assertSame([], $result->warnings);
+        self::assertTrue($this->decode($this->exporter()->export('blog', null, 'admin'))['templates'][0]['mailpit']);
+        $templates = $this->service(TemplateService::class);
+        \assert($templates instanceof TemplateService);
+        self::assertNull($templates->takeWarning(), 'the template service did not refresh inside the import');
+    }
+
     public function testThePortAccessRoundTripsAndAnOlderFileWithoutItGetsTheDefault(): void
     {
         $this->seedBlog();
