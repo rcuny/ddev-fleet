@@ -92,6 +92,7 @@ final readonly class TerminalController
             'truncated' => $clean['truncated'],
             'captured_at' => new \DateTimeImmutable()->format(\DATE_ATOM),
             'text' => $clean['text'],
+            'input' => $this->tmux->agentInput($id, $pane),
         ]);
     }
 }
