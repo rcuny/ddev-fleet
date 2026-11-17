@@ -416,6 +416,45 @@ final class TmuxTest extends TestCase
         self::assertFalse($pane->isAgent());
     }
 
+    public function testDdevExecAgentWithBackgroundShellsIsAccepted(): void
+    {
+        // FLE-361: the agent's background Bash shells (and their own children) stay in its foreground process group.
+        $this->paneWindow();
+        $ps = self::PS_CLAUDE
+            ."   2100  1959  1953  1953 pts/0    bash         /bin/bash -c -l ci-wait 4242\n"
+            ."   2101  2100  1953  1953 pts/0    sleep        sleep 30\n"
+            ."   2200  1959  1953  1953 pts/0    bash         /bin/bash -c -l composer run gates\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+
+        self::assertTrue($pane?->isAgent());
+        self::assertSame('ddev>claude', $pane->command);
+    }
+
+    public function testDdevExecShellBesideTheAgentIsRefused(): void
+    {
+        // A shell in the foreground group that does not descend from the agent (a child of the wrapper) still fails closed.
+        $this->paneWindow();
+        $ps = self::PS_CLAUDE."   2300  1953  1953  1953 pts/0    bash         bash\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testShellUnderAnAgentOutsideTheForegroundGroupDoesNotCount(): void
+    {
+        // The walk follows only members of the foreground group: a group member whose parent is an agent in another group
+        // has no agent ancestor inside the group.
+        $this->paneWindow();
+        $ps = "   1953     0  1953  1953 pts/0    bash         bash -c set -eu && ( claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions )\n"
+            ."   1959  1953  1959  1953 pts/0    claude       claude --model sonnet /jira work OWA-123 --allow-dangerously-skip-permissions\n"
+            ."   2400  1959  1953  1953 pts/0    bash         bash\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
     public function testTwoMatchingContainerSessionsAreRefused(): void
     {
         $this->paneWindow();
