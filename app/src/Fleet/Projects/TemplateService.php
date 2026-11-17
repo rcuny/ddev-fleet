@@ -143,8 +143,9 @@ final class TemplateService
      * @throws NotFound
      * @throws ValidationFailed
      */
-    public function update(string $project, string $name, TemplateInput $input): Template
+    public function update(string $project, string $name, TemplateInput $input, bool $refresh = true): Template
     {
+        $this->warning = null;
         $template = $this->get($project, $name);
         $input = $input->normalised();
 
@@ -178,7 +179,7 @@ final class TemplateService
         }
         // FLE-346: the Mailpit route is a Caddy site block of every instance of the project (MailpitExposure reads the
         // template), so the sites follow the option. A failure is a warning: the change is saved, port:refresh retries.
-        if ($mailpitBefore !== $template->hasMailpit()) {
+        if ($refresh && $mailpitBefore !== $template->hasMailpit()) {
             $this->refreshSites($template->project());
         }
 
@@ -187,21 +188,14 @@ final class TemplateService
 
     private function refreshSites(Project $project): void
     {
-        $this->warning = null;
         if (null === $this->sites) {
             return;
         }
-        $retry = \sprintf('Run "fleet port:refresh --project=%s".', $project->name());
-        try {
-            $this->sites->refresh($project);
-        } catch (\Throwable $e) {
-            $this->warning = \sprintf('Mailpit changed but the Caddy sites were not refreshed: %s. %s', $e->getMessage(), $retry);
-
-            return;
-        }
+        // Like ProjectService: the refresher catches the per-instance failures itself and reports them in its warning.
+        $this->sites->refresh($project);
         $warning = $this->sites->takeWarning();
         if (null !== $warning) {
-            $this->warning = 'Mailpit changed. '.$warning.' '.$retry;
+            $this->warning = \sprintf('Mailpit changed. %s Run "fleet port:refresh --project=%s".', $warning, $project->name());
         }
     }
 

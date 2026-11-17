@@ -137,10 +137,38 @@ final class TemplateMailpitRefreshTest extends KernelTestCase
         self::assertSame($before, $this->site('acme--i1'));
         $warning = $this->service->takeWarning();
         self::assertNotNull($warning);
+        self::assertStringContainsString('acme--i1', $warning, 'the refresher\'s own warning is passed on');
         self::assertStringContainsString('bad config', $warning);
         self::assertStringContainsString('fleet port:refresh --project=acme', $warning);
         self::assertNull($this->service->takeWarning(), 'a warning is taken once');
         $this->em->clear();
         self::assertTrue($this->service->get('acme', 'full')->hasMailpit(), 'the template change itself stays saved');
+    }
+
+    public function testRefreshFalseLeavesTheSitesAloneForTheImportTransaction(): void
+    {
+        $this->deploy();
+        $before = $this->site('acme--i1');
+
+        $this->service->update('acme', 'full', $this->current()->with(['mailpit' => true]), false);
+
+        self::assertSame($before, $this->site('acme--i1'));
+        self::assertSame([], $this->runner->callsMatching(['caddy', 'validate']));
+        self::assertSame([], $this->runner->callsMatching(['caddy', 'reload']));
+        self::assertNull($this->service->takeWarning());
+        $this->em->clear();
+        self::assertTrue($this->service->get('acme', 'full')->hasMailpit(), 'the template change is saved');
+    }
+
+    public function testAWarningDoesNotLeakIntoALaterUpdate(): void
+    {
+        $this->deploy();
+        $this->runner->expect(['caddy', 'validate'], new CommandResult(1, '', 'Error: bad config'));
+        $this->change($this->current()->with(['mailpit' => true]));
+
+        // the warning of the failed refresh was not taken; the next update (nothing changes Mailpit) clears it
+        $this->change($this->current()->with(['tty1' => ['npm run watch']]));
+
+        self::assertNull($this->service->takeWarning());
     }
 }
