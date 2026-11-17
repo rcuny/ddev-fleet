@@ -23,7 +23,7 @@ use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
  * The one path to create, change and delete the templates of a project. Templates are always read through the
  * repository: the collection a Project loaded earlier goes stale when a template is saved.
  */
-final readonly class TemplateService
+final class TemplateService
 {
     public const int MAX_PER_PROJECT = 50;
 
@@ -34,7 +34,21 @@ final readonly class TemplateService
         private SshKeysLock $keysLock,
         private ?SlicesApplier $slices = null,
         private ?\App\Fleet\Ssh\PushKeyCheck $pushCheck = null,
+        private ?\App\Fleet\Instances\InstanceSiteRefresher $sites = null,
     ) {
+    }
+
+    private ?string $warning = null;
+
+    /**
+     * FLE-346: the warning left by the last update() when the Caddy sites did not follow a Mailpit change, once.
+     */
+    public function takeWarning(): ?string
+    {
+        $warning = $this->warning;
+        $this->warning = null;
+
+        return $warning;
     }
 
     /**
@@ -135,6 +149,7 @@ final readonly class TemplateService
         $input = $input->normalised();
 
         // Key check and save under the keys lock: two saves editing keys, or a key delete, cannot interleave (FLE-270).
+        $mailpitBefore = $template->hasMailpit();
         $limitBefore = $this->withKeys($input, function () use ($template, $input): ?int {
             $errors = $this->check($input, $template->project()->containerSsh(), $template->project());
             if ($input->name !== $template->name()) {
@@ -161,8 +176,33 @@ final readonly class TemplateService
         if ($limitBefore !== $template->cpuThreads()) {
             $this->slices?->sync();
         }
+        // FLE-346: the Mailpit route is a Caddy site block of every instance of the project (MailpitExposure reads the
+        // template), so the sites follow the option. A failure is a warning: the change is saved, port:refresh retries.
+        if ($mailpitBefore !== $template->hasMailpit()) {
+            $this->refreshSites($template->project());
+        }
 
         return $template;
+    }
+
+    private function refreshSites(Project $project): void
+    {
+        $this->warning = null;
+        if (null === $this->sites) {
+            return;
+        }
+        $retry = \sprintf('Run "fleet port:refresh --project=%s".', $project->name());
+        try {
+            $this->sites->refresh($project);
+        } catch (\Throwable $e) {
+            $this->warning = \sprintf('Mailpit changed but the Caddy sites were not refreshed: %s. %s', $e->getMessage(), $retry);
+
+            return;
+        }
+        $warning = $this->sites->takeWarning();
+        if (null !== $warning) {
+            $this->warning = 'Mailpit changed. '.$warning.' '.$retry;
+        }
     }
 
     /**

@@ -166,6 +166,9 @@ final class TemplateController extends AbstractController
                     $this->addFlash('success', 'Template saved.');
                     $this->flashPushKeyWarning($name);
                     $this->warnShared($saved);
+                    if (null !== ($sites = $this->templates->takeWarning())) {
+                        $this->addFlash('warning', $sites);
+                    }
 
                     return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {

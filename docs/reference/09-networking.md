@@ -48,7 +48,7 @@ DDEV's Mailpit runs in every web container. A template with **Mailpit** on (defa
 | Upstream | The router's loopback Mailpit port `127.0.0.1:8025`, with the `Host` rewritten to the instance's primary host name (the router picks the project by it). Websockets (`/api/events`) pass through. |
 | Off | No route exists: the host name gets Caddy's normal answer for an unknown host. Mailpit still runs in the container. |
 
-The instance page shows an **Open Mailpit** link while the option is on. The Mailpit password is not shown any more: nobody needs to type it.
+Changing the option rewrites the Caddy sites of the project's existing instances at once (turning it off removes the route); if Caddy refuses a site, the change is kept, a warning says so and `fleet port:refresh --project=<name>` retries. The instance page shows an **Open Mailpit** link while the option is on. The Mailpit password is not shown any more: nobody needs to type it.
 
 Limits: no instance id may start with `mailpit--` because the project name `mailpit` is reserved. An instance id can have 59 characters but `mailpit--` plus the id must stay within one 63-character DNS label, so an instance id longer than 54 characters gets no Mailpit route: the instance page says so and the Caddyfile is unaffected. The derived password sits in the instance's Caddy snippet (`instances/<id>.conf`, mode `0640`, group `caddy`) and is registered with the log masker.
 
