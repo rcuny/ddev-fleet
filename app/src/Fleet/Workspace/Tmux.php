@@ -47,8 +47,8 @@ final readonly class Tmux
     /** The timeout of the `docker exec ... ps` that looks inside an instance container (FLE-352). */
     private const float DOCKER_TIMEOUT = 8.0;
 
-    /** Foreground commands that mean "a shell at its prompt". */
-    private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', '-bash', '-sh', '-zsh'];
+    /** Foreground commands that mean "a shell at its prompt"; under an agent, a shell leaf must run a command (`-c`, FLE-361). */
+    private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', 'ash', 'ksh', '-bash', '-sh', '-zsh'];
 
     private const string PANE_FORMAT = "#{pane_id}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{window_width}\t#{@fleet_role}\t#{pane_start_command}";
 
@@ -507,13 +507,28 @@ final readonly class Tmux
             // FLE-361: an agent's own children (background shells, subagent commands) stay in its process group, so a leaf
             // counts when it is an agent or descends, inside the group, from one. A shell with no agent above it fails.
             $agent = self::agentAncestor($leaf, $byPid);
-            if (null === $agent) {
+            if (null === $agent || (\in_array($leaf['comm'], self::SHELLS, true) && !self::runsCommand($leaf['args']))) {
                 return null;
             }
             $command = $agent;
         }
 
         return $command;
+    }
+
+    /** Whether a shell's arguments carry `-c` (alone or in a short-option cluster such as `-lc`) before its command. */
+    private static function runsCommand(string $args): bool
+    {
+        foreach (\array_slice(explode(' ', $args), 1) as $word) {
+            if (!str_starts_with($word, '-')) {
+                return false;
+            }
+            if (1 === preg_match('/^-[A-Za-z]*c[A-Za-z]*$/D', $word)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

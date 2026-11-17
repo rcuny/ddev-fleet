@@ -444,12 +444,34 @@ final class TmuxTest extends TestCase
 
     public function testShellUnderAnAgentOutsideTheForegroundGroupDoesNotCount(): void
     {
-        // The walk follows only members of the foreground group: a group member whose parent is an agent in another group
-        // has no agent ancestor inside the group.
+        // The walk follows only members of the foreground group. The wrapper has an agent child in the group (so it is not
+        // a leaf); the one failing leaf's parent is an agent in another group, which must not count.
         $this->paneWindow();
         $ps = "   1953     0  1953  1953 pts/0    bash         bash -c set -eu && ( claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions )\n"
-            ."   1959  1953  1959  1953 pts/0    claude       claude --model sonnet /jira work OWA-123 --allow-dangerously-skip-permissions\n"
-            ."   2400  1959  1953  1953 pts/0    bash         bash\n";
+            ."   1959  1953  1953  1953 pts/0    claude       claude --model sonnet /jira work OWA-123 --allow-dangerously-skip-permissions\n"
+            ."   1970  1953  1970  1953 pts/0    claude       claude\n"
+            ."   2400  1970  1953  1953 pts/0    bash         bash -c sleep 30\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testInteractiveShellUnderTheAgentIsRefused(): void
+    {
+        // A shell the agent left on the terminal (no -c) would read the text: refused even though claude is above it.
+        $this->paneWindow();
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, self::PS_CLAUDE."   2500  1959  1953  1953 pts/0    bash         bash -i\n"));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testParentCycleInTheGroupFailsClosed(): void
+    {
+        $this->paneWindow();
+        $ps = self::PS_CLAUDE
+            ."   2600  2601  1953  1953 pts/0    sleep        sleep 1\n"
+            ."   2601  2600  1953  1953 pts/0    sleep        sleep 2\n"
+            ."   2602  2601  1953  1953 pts/0    sleep        sleep 3\n";
         $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
 
         self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
