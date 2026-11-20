@@ -158,7 +158,6 @@ final readonly class ProjectImporter
     private function refresh(string $name, bool $existed, ImportPlan $plan): array
     {
         $warning = null;
-        $warnings = [];
         if (!$existed) {
             $this->access->refresh();
             $warning = $this->access->takeWarning();
@@ -175,7 +174,7 @@ final readonly class ProjectImporter
             }
         }
 
-        return null === $warning ? $warnings : [$warning];
+        return null === $warning ? [] : [$warning];
     }
 
     /**

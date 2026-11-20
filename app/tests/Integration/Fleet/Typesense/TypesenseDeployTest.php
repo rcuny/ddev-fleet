@@ -73,13 +73,13 @@ final class TypesenseDeployTest extends InstanceJobTestCase
         );
     }
 
-    private function deploy(TypesenseSearchKeyStep $search): \App\Domain\Job\Job
+    private function deploy(TypesenseSearchKeyStep $search, ?\App\Domain\Instance\Instance $again = null): \App\Domain\Job\Job
     {
         $this->steps->append(new TypesenseEnvFileStep($this->keys, $this->masker));
         $this->steps->append($search);
-        $instance = $this->instance();
-        $job = $this->job('deploy', $instance);
-        $this->workflow->run($instance, $this->project, false, $log = $this->logFor($job), false);
+        $instance = $again ?? $this->instance();
+        $job = $this->job($again ? 'redeploy' : 'deploy', $instance);
+        $this->workflow->run($instance, $this->project, null !== $again, $log = $this->logFor($job), false);
         $log->finish();
 
         return $job;
@@ -286,6 +286,40 @@ final class TypesenseDeployTest extends InstanceJobTestCase
 
         self::assertEquals($before, $this->keys->forInstance($this->project, 'acme--main'));
         self::assertSame('TYPESENSE_API_KEY='.$before->admin."\n", file_get_contents($this->dir().'/.ddev/.env'));
+    }
+
+    public function testAHandSetProjectSecretIsTheMasterAndEnvFileAndWebEnvironmentAgree(): void
+    {
+        $this->enable();
+        $manual = bin2hex(random_bytes(32));
+        $this->secretStore->putManaged('acme', 'TYPESENSE_API_KEY', $manual, 'operator');
+
+        $this->deploy($this->searchStep([$this->emptyKeys(), new MockResponse('{}')]));
+
+        $env = (string) file_get_contents($this->dir().'/.ddev/.env');
+        $config = Yaml::parseFile($this->dir().'/.ddev/config.fleet.yaml');
+        $derived = $this->keys->forInstance($this->project, 'acme--main')->admin;
+        self::assertSame('TYPESENSE_API_KEY='.$derived."\n", $env);
+        self::assertContains('TYPESENSE_API_KEY='.$derived, $config['web_environment']);
+        self::assertNotSame($manual, $derived);
+        self::assertSame($manual, $this->secretStore->getManaged('acme', 'TYPESENSE_API_KEY'));
+    }
+
+    public function testSwitchingTheFlagOffAfterADeployWritesNothingOnTheNextOne(): void
+    {
+        $this->enable();
+        $first = $this->deploy($this->searchStep([$this->emptyKeys(), new MockResponse('{}')]));
+        $first->finish(\App\Domain\Job\JobStatus::Succeeded, 0, null, $this->clock->now());
+        $this->em->flush();
+        $this->enable(false);
+        @unlink($this->dir().'/.ddev/.env');
+        $this->requests = [];
+
+        $job = $this->deploy($this->searchStep([]), $this->instances->find('acme--main'));
+
+        self::assertFileDoesNotExist($this->dir().'/.ddev/.env');
+        self::assertStringNotContainsString('typesense', $this->logText($job));
+        self::assertSame([], $this->requests);
     }
 
     public function testTheEnvFileKeepsTheOtherVariables(): void
