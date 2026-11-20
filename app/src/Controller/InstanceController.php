@@ -210,10 +210,9 @@ final class InstanceController extends AbstractController
                     unset($ids[$instance->id()]);
                 }
             }
-            if ([] !== $skipped) {
-                $this->addFlash('warning', \sprintf('Skipped, protected against destroy: %s.', implode(', ', $skipped)));
-            }
             if ([] === $ids) {
+                $this->addFlash('warning', \sprintf('Skipped, protected against destroy: %s. Nothing was queued.', implode(', ', $skipped)));
+
                 return $this->redirectToRoute('instances', [], Response::HTTP_SEE_OTHER);
             }
         }
@@ -227,7 +226,12 @@ final class InstanceController extends AbstractController
         } catch (NotFound) {
             throw new NotFoundHttpException();
         }
-        $this->addFlash('success', \sprintf('%d %s queued.', \count($jobs), 1 === \count($jobs) ? 'job' : 'jobs'));
+        $queued = \sprintf('%d %s queued.', \count($jobs), 1 === \count($jobs) ? 'job' : 'jobs');
+        if ([] !== $skipped) {
+            $this->addFlash('warning', \sprintf('%s Skipped, protected against destroy: %s.', $queued, implode(', ', $skipped)));
+        } else {
+            $this->addFlash('success', $queued);
+        }
 
         return $this->redirectToRoute('instances', [], Response::HTTP_SEE_OTHER);
     }

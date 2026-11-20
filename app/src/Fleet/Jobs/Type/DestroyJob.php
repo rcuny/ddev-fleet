@@ -45,7 +45,7 @@ final readonly class DestroyJob implements JobType
 
         // Last line of defence: a job queued before the lock was set must not remove anything (FLE-363).
         if ($instance->isProtected()) {
-            throw new JobFailed(\sprintf('Instance %s is protected: nothing was removed. Remove the protection on its page, then retry.', $id));
+            throw new JobFailed(\sprintf('Instance %s is protected: nothing was removed. Remove the protection on the instance page, then retry (a retry is refused while the protection is set).', $id));
         }
 
         try {
