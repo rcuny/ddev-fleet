@@ -69,6 +69,13 @@ final readonly class SnapshotJob implements JobType
             $log->line(\sprintf('Exporting the database of %s with ddev export-db.', $id));
             $result = $this->ddev->run($dir, ['ddev', 'export-db', '--gzip', '--file='.$temporary], [], $log->output(...));
             if (!$result->isSuccess()) {
+                // FLE-355 / FLE-295: export-db runs the dump without credentials and fails where the db container has no
+                // client config. Fall back to DDEV's own database account (db/db), dumping from the web container.
+                $log->line(\sprintf('ddev export-db failed (exit %d); retrying with the DDEV database credentials.', $result->exitCode));
+                @unlink($temporary);
+                $result = $this->dumpWithCredentials($dir, $temporary, $log);
+            }
+            if (!$result->isSuccess()) {
                 throw new JobFailed(\sprintf('ddev export-db failed (exit %d): see the job log.', $result->exitCode), $result->exitCode);
             }
             $size = is_file($temporary) ? filesize($temporary) : false;
@@ -87,6 +94,27 @@ final readonly class SnapshotJob implements JobType
                 @unlink($temporary);
             }
         }
+    }
+
+    /** Dumps through the web container (the checkout is mounted there) into a hidden file of the checkout, then moves it. */
+    private function dumpWithCredentials(string $dir, string $temporary, JobLog $log): \App\Fleet\Shell\CommandResult
+    {
+        $inside = '.fleet-snapshot-'.bin2hex(random_bytes(8)).'.sql.gz';
+        $script = 'set -o pipefail; d=$(command -v mariadb-dump || command -v mysqldump) && '
+            .'"$d" -h db -udb -pdb --single-transaction --routines db | gzip > '.$inside;
+        $result = $this->ddev->run($dir, ['ddev', 'exec', $script], [], $log->output(...));
+        $file = $dir.'/'.$inside;
+        try {
+            if ($result->isSuccess() && is_file($file) && !@copy($file, $temporary)) {
+                $log->line('Could not copy the dump out of the checkout.');
+
+                return new \App\Fleet\Shell\CommandResult(1);
+            }
+        } finally {
+            @unlink($file);
+        }
+
+        return $result;
     }
 
     /**

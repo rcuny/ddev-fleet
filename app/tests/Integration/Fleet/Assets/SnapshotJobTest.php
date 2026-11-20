@@ -130,6 +130,7 @@ final class SnapshotJobTest extends JobTestCase
     {
         $job = $this->running();
         $this->runner->expect(['ddev', 'export-db'], new CommandResult(2, '', "Failed to export: db container is not running\n"), $this->exportsA('partial'));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(2, '', "db unreachable\n"));
 
         try {
             $this->job()->execute($job, $this->log($job));
@@ -141,6 +142,26 @@ final class SnapshotJobTest extends JobTestCase
         self::assertSame([], glob($this->assets.'/dumps/*') ?: []);
         self::assertSame([], glob($this->assets.'/dumps/.fleet-upload-*') ?: []);
         self::assertStringContainsString('db container is not running', (string) file_get_contents($this->paths->jobLog('1', 'blog--i1')));
+    }
+
+    public function testAFailedExportFallsBackToTheDdevDatabaseCredentials(): void
+    {
+        $job = $this->running();
+        $dir = $this->paths->instanceDir('blog--i1');
+        $this->runner->expect(['ddev', 'export-db'], new CommandResult(1, '', "access denied\n"));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(0), static function (array $argv) use ($dir): void {
+            self::assertSame(1, preg_match('/> (\.fleet-snapshot-\w+\.sql\.gz)$/', $argv[2], $m));
+            file_put_contents($dir.'/'.($m[1] ?? ''), (string) gzencode('-- sql'));
+        });
+
+        $this->job()->execute($job, $this->log($job));
+
+        $exec = $this->runner->callsMatching(['ddev', 'exec']);
+        self::assertCount(1, $exec);
+        self::assertStringContainsString('-udb -pdb', $exec[0]->argv[2]);
+        self::assertSame($dir, $exec[0]->cwd);
+        self::assertSame('-- sql', gzdecode((string) file_get_contents($this->assets.'/dumps/default-blog--i1-20261020T090000Z.sql.gz')));
+        self::assertSame([], glob($dir.'/.fleet-snapshot-*') ?: []);
     }
 
     public function testAnEmptyExportIsAFailure(): void
