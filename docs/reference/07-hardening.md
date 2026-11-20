@@ -115,6 +115,29 @@ Live check on a host (replace the project names): from a web container of a proj
 
 **Database credentials.** The isolation is at the network level. The database user and root password stay DDEV's defaults inside each project: DDEV's tooling (`ddev import-db`, `ddev export-db`, `ddev mysql`, the generated Drupal settings) relies on them, and Fleet's database jobs use those commands. A container that cannot resolve or reach another project's `db` cannot log in to it, whatever the credentials are. Per-instance random credentials are planned as a separate change.
 
+### The database `root` account is locked
+
+Since 1.13 Fleet runs `ALTER USER IF EXISTS 'root'@'%' ACCOUNT LOCK` after every start, restart, deploy and redeploy of an instance. DDEV's `db`/`db` user and `root@localhost` stay. Anything that connects to the database as `root` over the network (from the web container, a CI job, a post-deploy hook or a tty command) now fails, quietly if the script swallows the error:
+
+```
+ERROR 4151 (HY000): Access denied, this account is locked
+```
+
+**What to use instead**
+
+- Connect as `db` (password `db`, database `db`): `ddev mysql`, `ddev import-db` and the generated Drupal settings already do.
+- `db` can create and drop the databases named `test` and `test_%` (DDEV grants it). Name test, kernel or PHPUnit databases `test_<name>`, and create them as `db`.
+- `ddev import-db --database=<other>` works only for a `test_%` name. Any other extra database needs `root`: run the statement from the host with `docker exec <db container> mysql -uroot -e "..."` (the unix socket is not blocked by the lock), or keep it in a single database.
+- Do not unlock `root@%` from a project hook: Fleet locks it again at the next start.
+
+**Find the callers in your project** (also in the templates and `post_deploy` commands of your Fleet registry):
+
+```bash
+grep -rnE "(-u ?root|--user=root|root:root@|mysql://root|-proot|uroot)" .ddev/ scripts/ bin/ ci/ *.sh *.yaml *.yml
+```
+
+Fleet's own code and the shipped templates have no such caller: Fleet talks to the database through the unix socket as `root@localhost` (statistics, the lock itself) and through `ddev` commands.
+
 ## Container-to-host ports
 
 With [network isolation](17-instance-isolation.md#network-isolation-between-instances) in `enforce` mode, containers reach the host only on 80, 443, the public catalogue ports (`fleet port:firewall` lists them), DNS to the bridge gateway and ICMP. The host's `sshd` on port 22 is therefore no longer reachable from a container through the bridge gateway. Another port a project needs on the host (for example Xdebug's 9003 towards an IDE) is added under **Settings → Isolation**. The `--harden` option only keeps the `nftables` package and the boot unit available; it does not turn isolation on.
