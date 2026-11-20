@@ -57,6 +57,10 @@ Options are in [01-cli.md](01-cli.md). Limit changes reapply the slices by thems
 ## What capacity does not cover
 
 - RAM: Fleet sets no memory limit.
+- tmpfs: `fleet:host:capacity` and the host page's Capacity tab warn when `/tmp` is a tmpfs more than 50% full, or
+  when `Shmem` in `/proc/meminfo` is above 25% of the RAM. The JSON report has `memory` (`shmem_mb`, `shmem_percent`,
+  `tmp`: `tmpfs`, `size_mb`, `used_mb`, `percent`) and `warnings` (a list of `{code, message}`, codes `tmp_tmpfs_high`
+  and `shmem_high`; empty when all is well). The installer caps the `/tmp` tmpfs (`docs/reference/04-installer.md`).
 - Disk and I/O: no quota or priority either; watch the disk holding `/srv/fleet` yourself.
 - A per-instance CPU cap or CPU pinning: only the project and template ceilings exist.
 

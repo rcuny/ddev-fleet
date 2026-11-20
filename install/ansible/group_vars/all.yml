@@ -43,6 +43,9 @@ fleet_shell_bashrc: /etc/bash.bashrc
 # The user who ran sudo ansible-playbook; its ~/.bashrc is hooked too. Empty = none.
 fleet_shell_sudo_user: "{{ lookup('ansible.builtin.env', 'SUDO_USER') }}"
 
+# host_tmp (FLE-369): cap of the /tmp tmpfs in MB (Debian's default is 50% of the RAM); 0 = leave /tmp alone
+fleet_tmp_size_mb: 4096
+
 # ddev
 fleet_ddev_key_url: https://pkg.ddev.com/apt/gpg.key
 fleet_ddev_key_fingerprint: DBD730A3A581BDAC98BAF17FC16711FC1179C7CA

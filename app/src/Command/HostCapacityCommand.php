@@ -55,6 +55,14 @@ final class HostCapacityCommand extends Command
         if (null !== $report['docker_networks']) {
             $output->writeln(\sprintf('docker networks %d/%d', $report['docker_networks']['used'], $report['docker_networks']['max']));
         }
+        /** @var array{shmem_mb: int|null, tmp: array{tmpfs: bool, size_mb: int|null, used_mb: int|null, percent: int|null}} $memory */
+        $memory = $report['memory'];
+        $output->writeln(\sprintf('shmem %s, /tmp %s', null === $memory['shmem_mb'] ? 'n/a' : $memory['shmem_mb'].' MB', $memory['tmp']['tmpfs'] ? \sprintf('tmpfs %s of %s MB', $memory['tmp']['used_mb'] ?? 'n/a', $memory['tmp']['size_mb'] ?? 'n/a') : 'on disk'));
+        /** @var list<array{code: string, message: string}> $warnings */
+        $warnings = $report['warnings'];
+        foreach ($warnings as $warning) {
+            $output->writeln('<comment>WARNING: '.$warning['message'].'</comment>');
+        }
         foreach ($report['projects'] as $project) {
             $output->writeln(\sprintf('  %s: %s threads%s, slots %s, busy %s, use %s', $project['name'], $project['effective_threads'], null === $project['cpu_threads'] ? ' (unlimited)' : '', $this->show($project['slots'], 'unlimited'), $project['busy'], $this->show($project['used_cores'], 'n/a')));
             /** @var list<array<string, mixed>> $templates */
