@@ -365,6 +365,10 @@ final readonly class Tmux
         if (null === $state || $state['window'] !== $instanceId || $state['dead'] || null === $this->effectiveForeground($instanceId, $state)) {
             throw new WorkspaceException(\sprintf('The pane stopped running an agent %s; Enter was not sent.', $when));
         }
+        // A usage-limit dialog may have appeared during the pause: never submit text into it (FLE-368).
+        if (null !== $this->usageLimitOf($pane->id)) {
+            throw new WorkspaceException(\sprintf('The agent showed its usage-limit dialog %s; Enter was not sent.', $when));
+        }
     }
 
     private function pause(): void
@@ -460,7 +464,8 @@ final readonly class Tmux
 
     private function usageLimitOf(string $paneId): ?UsageLimit
     {
-        $result = $this->tmux(['capture-pane', '-p', '-J', '-t', $paneId, '-S', '-30']);
+        // The visible screen only (no -S): a dialog that was dismissed but still sits in the scrollback is not the current state.
+        $result = $this->tmux(['capture-pane', '-p', '-J', '-t', $paneId]);
 
         return $result->isSuccess() ? UsageLimit::detect($result->stdout) : null;
     }

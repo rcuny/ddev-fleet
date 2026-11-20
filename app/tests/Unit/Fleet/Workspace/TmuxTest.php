@@ -565,6 +565,7 @@ final class TmuxTest extends TestCase
     public function testSendToAgentTypesThenSendsEnterSeparatelyAndConfirmsAnEmptyInputBox(): void
     {
         $pane = $this->claudePane();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "working\n❯ \n"));
 
         self::assertSame(Tmux::SEND_SUBMITTED, $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true));
@@ -576,7 +577,9 @@ final class TmuxTest extends TestCase
     public function testSendToAgentSendsEnterOnceMoreWhenTheTextIsStillInTheInputBox(): void
     {
         $pane = $this->claudePane();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ Continue now\n"));
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n"));
 
         self::assertSame(Tmux::SEND_RETRIED, $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true));
@@ -594,6 +597,7 @@ final class TmuxTest extends TestCase
         $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], $claude);
         // Before the retry Enter the agent has exited: a shell is in the foreground.
         $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tbash\t0\t99\n"));
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ Continue now\n"));
 
         try {
@@ -610,7 +614,9 @@ final class TmuxTest extends TestCase
     public function testSendToAgentReportsUnconfirmedAfterOneRetry(): void
     {
         $pane = $this->claudePane();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ Continue now\n"));
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ Continue now\n"));
 
         self::assertSame(Tmux::SEND_UNCONFIRMED, $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true));
@@ -620,6 +626,7 @@ final class TmuxTest extends TestCase
     public function testAPromptSuggestionIsNotTakenForTypedTextAndGetsNoRetry(): void
     {
         $pane = $this->claudePane();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n")); // the usage-limit re-check before Enter
         $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \e[2mContinue now\e[0m\n"));
 
         self::assertSame(Tmux::SEND_SUBMITTED, $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true));
@@ -638,5 +645,31 @@ final class TmuxTest extends TestCase
 
         self::assertSame(['text' => 'commit and push once green', 'suggestion' => true], $ghost);
         self::assertSame(['text' => 'typed draft', 'suggestion' => false], $typed);
+    }
+
+    public function testUsageLimitReadsTheVisibleScreenOnlyNotTheScrollback(): void
+    {
+        $this->paneWindow();
+        // The dialog was dismissed: the visible screen shows a normal prompt (a scrollback read would still find the dialog).
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "● Continuing.\n❯ \n"));
+
+        self::assertNull($this->tmux->usageLimit(self::ID, Pane::Tty2));
+        $capture = $this->tmuxCalls('capture-pane')[0];
+        self::assertNotContains('-S', $capture, 'no scrollback');
+    }
+
+    public function testSendToAgentDoesNotPressEnterWhenTheUsageLimitDialogAppearedDuringThePause(): void
+    {
+        $pane = $this->claudePane();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "What do you want to do?\n❯ 1. Stop and wait for limit to reset\n  2. Wait here, then continue automatically\n"));
+
+        try {
+            $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true);
+            self::fail('Enter must not be sent into the dialog.');
+        } catch (WorkspaceException $e) {
+            self::assertStringContainsString('usage-limit', $e->getMessage());
+        }
+
+        self::assertCount(1, $this->tmuxCalls('send-keys'), 'the text only, no Enter');
     }
 }
