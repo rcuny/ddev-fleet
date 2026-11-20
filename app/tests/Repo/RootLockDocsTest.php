@@ -42,9 +42,12 @@ final class RootLockDocsTest extends TestCase
         self::assertStringContainsString('07-hardening.md#the-database-root-account-is-locked', $page);
     }
 
-    public function testChangelogFragmentExists(): void
+    public function testChangelogEntryExists(): void
     {
-        self::assertStringContainsString('FLE-349', self::read('changelog.d/FLE-349.md'));
+        // A changelog.d fragment on develop; a release assembles the fragments into CHANGELOG.md and deletes them.
+        $fragment = __DIR__.'/../../../changelog.d/FLE-349.md';
+        $text = is_file($fragment) ? (string) file_get_contents($fragment) : self::read('CHANGELOG.md');
+        self::assertMatchesRegularExpression('/\bFLE-349\b/', $text);
     }
 
     /**
