@@ -20,8 +20,8 @@ use Symfony\Component\Routing\Attribute\Route;
  */
 final class ReauthController extends AbstractController
 {
-    /** Where the person returns to: a page of the admin area, never another host or a path with a scheme. */
-    private const string NEXT = '#^/admin(?:/(?!\.+(?:/|$))[A-Za-z0-9._-]+)*$#D';
+    /** Where the person returns to: a page of the admin area or an instance page (FLE-363), never another host or a path with a scheme. */
+    private const string NEXT = '#^(?:/admin(?:/(?!\.+(?:/|$))[A-Za-z0-9._-]+)*|/instances/[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*)$#D';
 
     public function __construct(
         private readonly ReauthService $reauth,

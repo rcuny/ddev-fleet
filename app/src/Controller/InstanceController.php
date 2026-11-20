@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Domain\Instance\Instance;
+use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobTrigger;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Ddev\DdevUnavailable;
 use App\Fleet\Instances\DeployInput;
 use App\Fleet\Instances\InstanceHostnames;
@@ -30,6 +32,8 @@ use App\Form\Instance\DeployType;
 use App\Form\Project\ValidationErrorMapper;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
+use App\Security\Reauth\ReauthGuard;
+use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormError;
 use Symfony\Component\HttpFoundation\Request;
@@ -63,6 +67,10 @@ final class InstanceController extends AbstractController
         private readonly InstanceTopics $topics,
         private readonly MailpitExposure $mailpit,
         private readonly LinkResolver $linkResolver,
+        private readonly InstanceRepository $instanceRepository,
+        private readonly ReauthGuard $reauth,
+        private readonly AuditLog $audit,
+        private readonly ClockInterface $clock,
     ) {
     }
 
@@ -193,6 +201,22 @@ final class InstanceController extends AbstractController
             $this->denyAccessUnlessGranted('destroy' === $action ? ProjectVoter::DESTROY : ProjectVoter::OPERATE, $instance->project());
         }
 
+        // FLE-363: a protected instance is skipped by a bulk destroy and named in the flash; the others go on.
+        $skipped = [];
+        if ('destroy' === $action) {
+            foreach ($instances as $instance) {
+                if ($instance->isProtected()) {
+                    $skipped[] = $instance->id();
+                    unset($ids[$instance->id()]);
+                }
+            }
+            if ([] === $ids) {
+                $this->addFlash('warning', \sprintf('Skipped, protected against destroy: %s. Nothing was queued.', implode(', ', $skipped)));
+
+                return $this->redirectToRoute('instances', [], Response::HTTP_SEE_OTHER);
+            }
+        }
+
         try {
             $jobs = $this->service->request($action, new Selector(ids: array_values($ids)), new OperationOptions(), JobTrigger::Ui, $this->actor->name());
         } catch (Refused|ValidationFailed $failed) {
@@ -202,7 +226,12 @@ final class InstanceController extends AbstractController
         } catch (NotFound) {
             throw new NotFoundHttpException();
         }
-        $this->addFlash('success', \sprintf('%d %s queued.', \count($jobs), 1 === \count($jobs) ? 'job' : 'jobs'));
+        $queued = \sprintf('%d %s queued.', \count($jobs), 1 === \count($jobs) ? 'job' : 'jobs');
+        if ([] !== $skipped) {
+            $this->addFlash('warning', \sprintf('%s Skipped, protected against destroy: %s.', $queued, implode(', ', $skipped)));
+        } else {
+            $this->addFlash('success', $queued);
+        }
 
         return $this->redirectToRoute('instances', [], Response::HTTP_SEE_OTHER);
     }
@@ -251,6 +280,41 @@ final class InstanceController extends AbstractController
         }
 
         return $response;
+    }
+
+    /**
+     * Locks or unlocks an instance against destroy (FLE-363). Admins only, and the password re-auth is asked in both
+     * directions (the window is closed after each change). A repeat of the stored state changes nothing.
+     */
+    #[Route('/instances/{id}/protection', name: 'instance_protection', requirements: ['id' => self::ID], methods: ['POST'])]
+    public function protection(Request $request, string $id): Response
+    {
+        $instance = $this->instance($id);
+        $this->denyAccessUnlessGranted(ProjectVoter::SETTINGS);
+        $this->assertCsrf($request);
+        $protect = '1' === $request->request->get('protect');
+        $back = $this->redirectToRoute('instance_show', ['id' => $id], Response::HTTP_SEE_OTHER);
+
+        if ($protect === $instance->isProtected()) {
+            $this->addFlash('success', 'No change: the instance was already '.($protect ? 'protected' : 'unprotected').'.');
+
+            return $back;
+        }
+        if (!$this->reauth->requireRecentAuth()) {
+            return $this->reauth->challenge('instance-protection', $id, '/instances/'.$id);
+        }
+
+        if ($protect) {
+            $instance->protect($this->actor->name(), $this->clock->now());
+        } else {
+            $instance->unprotect($this->clock->now());
+        }
+        $this->instanceRepository->save($instance);
+        $this->reauth->close();
+        $this->audit->record($this->actor->name(), AuditLog::INSTANCE_PROTECT, $id.'/'.($protect ? 'on' : 'off'));
+        $this->addFlash('success', $protect ? 'The instance is now protected against destroy.' : 'The protection is removed.');
+
+        return $back;
     }
 
     #[Route('/instances/{id}/{action}', name: 'instance_action', requirements: ['id' => self::ID, 'action' => self::ACTIONS], methods: ['POST'])]

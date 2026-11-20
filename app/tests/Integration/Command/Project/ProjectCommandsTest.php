@@ -245,8 +245,10 @@ final class ProjectCommandsTest extends KernelTestCase
 
         $this->cli('fleet:project:update', ['name' => 'blog', '--no-typesense' => true]);
         self::assertFalse($this->snapshot('blog')['typesense']);
+        self::assertNotContains('typesense', $this->snapshot('blog')['ports']);
         $this->cli('fleet:project:update', ['name' => 'blog', '--typesense' => true]);
         self::assertTrue($this->snapshot('blog')['typesense']);
+        self::assertContains('typesense', $this->snapshot('blog')['ports']);
         $this->cli('fleet:project:update', ['name' => 'blog', '--git-bot' => 'off']);
         self::assertSame('disabled', $this->snapshot('blog')['git_bot']['mode']);
         $this->cli('fleet:project:update', ['name' => 'blog', '--git-bot' => 'inherit']);

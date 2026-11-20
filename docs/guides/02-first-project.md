@@ -36,7 +36,7 @@ Names (project, template, port) are **immutable**: an instance id is `<project>-
 
 6. **Watch and open.** The job page streams the log as it runs. When the instance is `running`, open `https://website--main.fleet.example.com`. Success: you sign in at the portal and see the site.
 
-   **Read the mail your site sends.** Every instance runs DDEV's Mailpit, which catches outgoing mail instead of delivering it. To open it from the browser, tick **Mailpit** on the template (`fleet template:update website web --mailpit=yes`), then redeploy or refresh the host. The instance page gets an **Open Mailpit** link to `https://mailpit--website--main.fleet.example.com`. You sign in once, with your Fleet account: nobody who cannot see the instance can open its Mailpit.
+   **Read the mail your site sends.** Every instance runs DDEV's Mailpit, which catches outgoing mail instead of delivering it. To open it from the browser, tick **Mailpit** on the template (`fleet template:update website web --mailpit=yes`); the Caddy sites of the template's existing instances are refreshed at once, with no redeploy. The instance page gets an **Open Mailpit** link to `https://mailpit--website--main.fleet.example.com`. You sign in once, with your Fleet account: nobody who cannot see the instance can open its Mailpit.
 
 7. **Let alice in.** Grant her the project (**Access** tab, or `fleet user:grant alice website`). It applies at once. Roles: [share and access](06-share-and-access.md).
 
@@ -55,6 +55,10 @@ More: [troubleshooting](../reference/13-troubleshooting.md).
 - [Automate deploys](03-automate-deploys.md) from Jira, Bitbucket or a timer
 - [Share and access](06-share-and-access.md)
 - [Configuration reference](../reference/02-configuration.md)
+
+## Protect an instance from destroy (optional)
+
+If an instance must not disappear by accident, an administrator can lock it. Open the instance page, find the **Protection** section and choose **Protect**; Fleet asks for your password again. A protected instance shows a lock badge in the list and on its page, and its **Destroy** buttons are gone. While it is locked nothing can destroy it: the web page, a bulk destroy (which skips it and names it), the HTTP API (`409 instance_protected`, also for a batch or a retried destroy) and `fleet instance:destroy` (it reports the instance as refused and exits with 2) all refuse. There is no command-line or API way to unlock: the only way back is **Remove protection** on the instance page, which asks for the password again. Redeploy, start and stop still work. The API shows the state as the read-only `protected` field. Who protects which instance is the administrators' decision; nothing is protected by default.
 
 ## Isolation between instances (optional)
 

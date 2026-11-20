@@ -13,6 +13,9 @@ final class Refused extends \DomainException
     /** The `reason` of a refusal because the instance has a queued or running job. */
     public const string BUSY = 'busy';
 
+    /** The `reason` of a refusal because the instance is protected against destroy (FLE-363). */
+    public const string PROTECTED = 'protected';
+
     /**
      * @param string|null $reason a machine-readable kind for callers that must tell refusals apart (the JSON endpoints
      *                            send it as `reason`); null for the common case

@@ -48,7 +48,7 @@ DDEV's Mailpit runs in every web container. A template with **Mailpit** on (defa
 | Upstream | The router's loopback Mailpit port `127.0.0.1:8025`, with the `Host` rewritten to the instance's primary host name (the router picks the project by it). Websockets (`/api/events`) pass through. |
 | Off | No route exists: the host name gets Caddy's normal answer for an unknown host. Mailpit still runs in the container. |
 
-The instance page shows an **Open Mailpit** link while the option is on. The Mailpit password is not shown any more: nobody needs to type it.
+Changing the option rewrites the Caddy sites of the project's existing instances at once (turning it off removes the route); if Caddy refuses a site, the change is kept, a warning says so and `fleet port:refresh --project=<name>` retries. The instance page shows an **Open Mailpit** link while the option is on. The Mailpit password is not shown any more: nobody needs to type it.
 
 Limits: no instance id may start with `mailpit--` because the project name `mailpit` is reserved. An instance id can have 59 characters but `mailpit--` plus the id must stay within one 63-character DNS label, so an instance id longer than 54 characters gets no Mailpit route: the instance page says so and the Caddyfile is unaffected. The derived password sits in the instance's Caddy snippet (`instances/<id>.conf`, mode `0640`, group `caddy`) and is registered with the log masker.
 
@@ -88,6 +88,10 @@ Fleet installs no Typesense server: each instance runs its own container from th
 | `FLEET_TYPESENSE_SEARCH_KEY` | `web_environment` | Search-only key, registered after `ddev start`. |
 | `FLEET_TYPESENSE_HOST` | `web_environment` | The instance host. |
 | `FLEET_TYPESENSE_PORT` | `web_environment` | Public port of the `typesense` entry (9108); https. |
+
+The flag and the `typesense` named port are one setting. `fleet project:update <project> --no-typesense` also unassigns the `typesense` port (re-assigning it with `--port=typesense` turns the flag back on), and the Network tab behaves the same. With the flag off a deploy or redeploy writes no `.ddev/.env` key and no Typesense variable.
+
+The key in `.ddev/.env` is not the project secret itself. The project secrets `TYPESENSE_API_KEY` and `FLEET_TYPESENSE_SEARCH_KEY` (also when set by hand with `fleet secret:set`) are the master keys. Each instance gets a derived 48-hex pair, the same in `.ddev/.env` and `web_environment`, and stable across redeploys of that instance. A compose file that needs the project's own value must read it from another variable.
 
 Registering the search key is retried for up to 60 seconds; if Typesense never answers, the job log gets `WARNING: typesense` and the deploy succeeds. Operator steps: switch on the project's Typesense flag, run `fleet port:firewall` and open the port, deploy.
 

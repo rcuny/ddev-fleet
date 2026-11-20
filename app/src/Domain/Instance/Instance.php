@@ -57,6 +57,16 @@ class Instance
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
     private ?\DateTimeImmutable $deployedAt = null;
 
+    /** FLE-363: while true nothing destroys the instance (API, web, CLI); an admin lifts it on the instance page. */
+    #[ORM\Column(name: 'protected', type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $protected = false;
+
+    #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
+    private ?\DateTimeImmutable $protectedAt = null;
+
+    #[ORM\Column(type: Types::STRING, length: 254, nullable: true)]
+    private ?string $protectedBy = null;
+
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
 
@@ -174,6 +184,38 @@ class Instance
         $this->ramMib = $ramMib;
         $this->lastObservedAt = $at;
         $this->updatedAt = $at;
+    }
+
+    public function isProtected(): bool
+    {
+        return $this->protected;
+    }
+
+    public function protectedAt(): ?\DateTimeImmutable
+    {
+        return $this->protectedAt;
+    }
+
+    public function protectedBy(): ?string
+    {
+        return $this->protectedBy;
+    }
+
+    public function protect(string $actor, ?\DateTimeImmutable $now = null): void
+    {
+        $now ??= new \DateTimeImmutable();
+        $this->protected = true;
+        $this->protectedAt = $now;
+        $this->protectedBy = $actor;
+        $this->updatedAt = $now;
+    }
+
+    public function unprotect(?\DateTimeImmutable $now = null): void
+    {
+        $this->protected = false;
+        $this->protectedAt = null;
+        $this->protectedBy = null;
+        $this->updatedAt = $now ?? new \DateTimeImmutable();
     }
 
     public function recordHead(?string $sha): void

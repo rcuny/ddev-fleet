@@ -164,7 +164,9 @@ final readonly class ProjectImporter
             // A new project has a slice (the templates it brought are synced by the template service).
             $this->slices?->sync();
             $warning ??= $this->slices?->takeWarning();
-        } elseif (ImportItem::UPDATE === $this->actionOf($plan, 'project', $name) && $this->portsChanged($plan, $name)) {
+        } elseif ((ImportItem::UPDATE === $this->actionOf($plan, 'project', $name) && $this->portsChanged($plan, $name)) || $this->mailpitMayHaveChanged($plan)) {
+            // One rewrite covers both the ports and the templates' Mailpit option (FLE-346: the template service is told
+            // not to refresh inside the import transaction).
             $project = $this->projects->findByName($name);
             if (null !== $project) {
                 $this->sites->refresh($project);
@@ -481,7 +483,7 @@ final readonly class ProjectImporter
         foreach ($document['templates'] as $template) {
             match ($this->actionOf($plan, 'template', $template['name'])) {
                 ImportItem::CREATE => $this->templates->create($slug, self::templateInput($template)),
-                ImportItem::UPDATE => $this->templates->update($slug, $template['name'], $this->keepCapacity($slug, self::templateInput($template))),
+                ImportItem::UPDATE => $this->templates->update($slug, $template['name'], $this->keepCapacity($slug, self::templateInput($template)), false),
                 default => null,
             };
         }
@@ -619,6 +621,23 @@ final readonly class ProjectImporter
         }
 
         return null;
+    }
+
+    /**
+     * FLE-346: a template was updated with a new Mailpit value, or created (an instance may already name it).
+     */
+    private function mailpitMayHaveChanged(ImportPlan $plan): bool
+    {
+        foreach ($plan->items as $item) {
+            if ('template' !== $item->kind) {
+                continue;
+            }
+            if (ImportItem::CREATE === $item->action || (ImportItem::UPDATE === $item->action && 1 === preg_match('/\bmailpit\b/', (string) $item->note))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function portsChanged(ImportPlan $plan, string $project): bool

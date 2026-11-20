@@ -5,12 +5,19 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Export;
 
 use App\Domain\Audit\AuditEntryRepository;
+use App\Domain\Host\HostSettingsRepository;
+use App\Domain\Instance\Instance;
+use App\Domain\Instance\InstanceRepository;
+use App\Domain\Instance\InstanceState;
+use App\Domain\Project\ProjectRepository;
 use App\Domain\Schedule\ScheduleRepository;
 use App\Fleet\Export\ExportFormat;
 use App\Fleet\Export\ImportItem;
 use App\Fleet\Export\InvalidExport;
 use App\Fleet\Export\ProjectExporter;
 use App\Fleet\Export\ProjectImporter;
+use App\Fleet\FleetPaths;
+use App\Fleet\Instances\InstanceSiteWriter;
 use App\Fleet\Projects\NamedPortInput;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\ProjectService;
@@ -19,6 +26,9 @@ use App\Fleet\Projects\TemplateService;
 use App\Fleet\Schedules\ScheduleInput;
 use App\Fleet\Schedules\ScheduleService;
 use App\Fleet\Secrets\SecretStore;
+use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\CommandRunner;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\ExportFixtures;
 use App\Tests\Support\FleetDatabase;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -168,6 +178,128 @@ final class ProjectTransferTest extends KernelTestCase
         $this->switchToEmptyHost();
         $this->importer()->apply($this->encode($document), null, 'admin');
         self::assertFalse($this->decode($this->exporter()->export('blog', null, 'admin'))['templates'][0]['mailpit']);
+    }
+
+    /**
+     * FLE-346: an import that turns Mailpit on for an existing project's template saves it; the Caddy sites follow after the
+     * commit (ProjectImporter::refresh(), not inside the transaction), and nothing fails when no instance has a site.
+     */
+    public function testAnImportThatChangesMailpitOnAnExistingProjectIsSavedWithoutWarnings(): void
+    {
+        $this->seedBlog();
+        $document = $this->decode($this->exporter()->export('blog', null, 'admin'));
+        $document['templates'][0]['mailpit'] = true;
+
+        $result = $this->importer()->apply($this->encode($document), null, 'admin');
+
+        self::assertSame([], $result->warnings);
+        self::assertTrue($this->decode($this->exporter()->export('blog', null, 'admin'))['templates'][0]['mailpit']);
+        $templates = $this->service(TemplateService::class);
+        \assert($templates instanceof TemplateService);
+        self::assertNull($templates->takeWarning(), 'the template service did not refresh inside the import');
+    }
+
+    /**
+     * A deployed instance of the blog project on its "plain" template, with its Caddy site written; the runner's record is cleared.
+     */
+    private function deployBlogInstance(): RecordingCommandRunner
+    {
+        $project = $this->service(ProjectRepository::class);
+        \assert($project instanceof ProjectRepository);
+        $blog = $project->findByName('blog');
+        \assert(null !== $blog);
+        $host = new HostSettingsRepository($this->entityManager());
+        $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $instance = new Instance($blog, 'i1', 'plain', 'develop', 'admin');
+        $instance->changeState(InstanceState::Running);
+        new InstanceRepository($this->entityManager())->createMany([$instance]);
+        $writer = $this->service(InstanceSiteWriter::class);
+        \assert($writer instanceof InstanceSiteWriter);
+        $writer->write($instance, $blog);
+        $runner = $this->service(CommandRunner::class);
+        \assert($runner instanceof RecordingCommandRunner);
+        $runner->reset();
+
+        return $runner;
+    }
+
+    private function site(string $id): string
+    {
+        $paths = $this->service(FleetPaths::class);
+        \assert($paths instanceof FleetPaths);
+
+        return (string) file_get_contents($paths->instanceSiteFile($id));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function blogWithMailpitOn(): array
+    {
+        $document = $this->decode($this->exporter()->export('blog', null, 'admin'));
+        foreach ($document['templates'] as $i => $template) {
+            if ('plain' === $template['name']) {
+                $document['templates'][$i]['mailpit'] = true;
+            }
+        }
+
+        return $document;
+    }
+
+    /**
+     * FLE-360: with a deployed instance, the importer's after-commit refresh runs when only Mailpit changed: the site gains
+     * the Mailpit route and Caddy was validated and reloaded.
+     */
+    public function testAnImportThatTurnsMailpitOnRewritesTheSiteOfADeployedInstance(): void
+    {
+        $this->seedBlog();
+        $runner = $this->deployBlogInstance();
+        self::assertStringNotContainsString('mailpit--blog--i1', $this->site('blog--i1'));
+
+        $result = $this->importer()->apply($this->encode($this->blogWithMailpitOn()), null, 'admin');
+
+        self::assertSame([], $result->warnings);
+        self::assertStringContainsString("\nmailpit--blog--i1.fleet.example.com {\n", $this->site('blog--i1'));
+        self::assertCount(1, $runner->callsMatching(['caddy', 'validate']));
+        self::assertCount(1, $runner->callsMatching(['caddy', 'reload']));
+    }
+
+    public function testAFailedCaddyValidateAfterTheImportIsAWarningAndTheDataStaysSaved(): void
+    {
+        $this->seedBlog();
+        $runner = $this->deployBlogInstance();
+        $before = $this->site('blog--i1');
+        $runner->expect(['caddy', 'validate'], new CommandResult(1, '', 'Error: bad config'));
+
+        $result = $this->importer()->apply($this->encode($this->blogWithMailpitOn()), null, 'admin');
+
+        self::assertCount(1, $result->warnings);
+        self::assertStringContainsString('blog--i1', $result->warnings[0]);
+        self::assertStringContainsString('bad config', $result->warnings[0]);
+        self::assertSame($before, $this->site('blog--i1'), 'Caddy refused: the site is as it was');
+        $this->entityManager()->clear();
+        $saved = $this->decode($this->exporter()->export('blog', null, 'admin'));
+        $mailpit = array_column($saved['templates'], 'mailpit', 'name');
+        self::assertTrue($mailpit['plain'], 'the import itself stays saved');
+    }
+
+    public function testARolledBackImportDoesNotRefreshTheSites(): void
+    {
+        $this->seedBlog();
+        $runner = $this->deployBlogInstance();
+        $before = $this->site('blog--i1');
+        $this->entityManager()->getConnection()->executeStatement("CREATE TRIGGER refuse_template_update BEFORE UPDATE ON template BEGIN SELECT RAISE(ABORT, 'boom'); END");
+
+        try {
+            $this->importer()->apply($this->encode($this->blogWithMailpitOn()), null, 'admin');
+            self::fail('The write must fail.');
+        } catch (\Throwable $e) {
+            self::assertStringContainsString('boom', $e->getMessage());
+        }
+
+        self::assertSame($before, $this->site('blog--i1'));
+        self::assertSame([], $runner->callsMatching(['caddy', 'validate']));
+        self::assertSame([], $runner->callsMatching(['caddy', 'reload']));
     }
 
     public function testThePortAccessRoundTripsAndAnOlderFileWithoutItGetsTheDefault(): void

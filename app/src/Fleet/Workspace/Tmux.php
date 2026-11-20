@@ -52,8 +52,8 @@ final readonly class Tmux
     /** The timeout of the `docker exec ... ps` that looks inside an instance container (FLE-352). */
     private const float DOCKER_TIMEOUT = 8.0;
 
-    /** Foreground commands that mean "a shell at its prompt". */
-    private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', '-bash', '-sh', '-zsh'];
+    /** Foreground commands that mean "a shell at its prompt"; under an agent, a shell leaf must run a command (`-c`, FLE-361). */
+    private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', 'ash', 'ksh', '-bash', '-sh', '-zsh'];
 
     private const string PANE_FORMAT = "#{pane_id}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{window_width}\t#{@fleet_role}\t#{pane_start_command}";
 
@@ -341,15 +341,14 @@ final readonly class Tmux
         if ($enter) {
             $this->pause();
             // Again between the text and Enter: if the agent is gone, the text is left unsubmitted rather than run by a shell.
-            $after = $this->paneState($pane->id);
-            if (null === $after || $after['window'] !== $instanceId || $after['dead'] || null === $this->effectiveForeground($instanceId, $after)) {
-                throw new WorkspaceException('The pane stopped running an agent before Enter; Enter was not sent.');
-            }
+            $this->assertStillAgent($instanceId, $pane, 'before Enter');
             $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter');
             $this->pause();
             if (!$this->stillInInput($pane->id, $text)) {
                 return self::SEND_SUBMITTED;
             }
+            // The retry Enter follows a pause too: the agent may have exited meanwhile, and a shell would run the typed text.
+            $this->assertStillAgent($instanceId, $pane, 'before the second Enter');
             $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter again');
             $this->pause();
 
@@ -357,6 +356,15 @@ final readonly class Tmux
         }
 
         return self::SEND_TYPED;
+    }
+
+    /** @throws WorkspaceException when the pane is no longer the instance's live agent pane (no Enter must follow) */
+    private function assertStillAgent(string $instanceId, AgentPane $pane, string $when): void
+    {
+        $state = $this->paneState($pane->id);
+        if (null === $state || $state['window'] !== $instanceId || $state['dead'] || null === $this->effectiveForeground($instanceId, $state)) {
+            throw new WorkspaceException(\sprintf('The pane stopped running an agent %s; Enter was not sent.', $when));
+        }
     }
 
     private function pause(): void
@@ -448,7 +456,7 @@ final readonly class Tmux
      * What the pane runs as far as the agent gate is concerned (FLE-352), or null when it is not an agent. A host foreground
      * command in AGENTS counts as it is. `ddev` (an agent started with `ddev exec claude ...`, which is what a Fleet agent pane
      * runs) is looked through: the instance container's terminal session must be exactly one, matching the host command, whose
-     * foreground leaf processes are all agents. Everything else, and any failure, is null (fail closed).
+     * foreground leaf processes are all agents or children of an agent. Everything else, and any failure, is null (fail closed).
      *
      * @param array{window: string, command: string, dead: bool, pid: string} $state
      *
@@ -545,7 +553,8 @@ final readonly class Tmux
     /**
      * Looks into the container `ddev-<instance>-<service>`: the terminal sessions are the processes with a tty whose parent is 0
      * (PID 1 is the container init). Exactly one must carry the host command in its arguments; its tty's foreground process
-     * group must have at least one leaf (a member without a child in the group) and every leaf must be an agent.
+     * group must have at least one leaf (a member without a child in the group) and every leaf must be an agent or descend,
+     * within the group, from an agent (its background shells, FLE-361).
      *
      * @param list<string> $hostCommand
      */
@@ -588,15 +597,58 @@ final readonly class Tmux
         if ([] === $leaves) {
             return null;
         }
+        $byPid = array_column($group, null, 'pid');
         $command = null;
         foreach ($leaves as $leaf) {
-            if (!\in_array($leaf['comm'], self::AGENTS, true)) {
+            // FLE-361: an agent's own children (background shells, subagent commands) stay in its process group, so a leaf
+            // counts when it is an agent or descends, inside the group, from one. A shell with no agent above it fails.
+            $agent = self::agentAncestor($leaf, $byPid);
+            if (null === $agent || (\in_array($leaf['comm'], self::SHELLS, true) && !self::runsCommand($leaf['args']))) {
                 return null;
             }
-            $command = $leaf['comm'];
+            $command = $agent;
         }
 
         return $command;
+    }
+
+    /** Whether a shell's arguments carry `-c` (alone or in a short-option cluster such as `-lc`) before its command. */
+    private static function runsCommand(string $args): bool
+    {
+        foreach (\array_slice(explode(' ', $args), 1) as $word) {
+            if (!str_starts_with($word, '-')) {
+                return false;
+            }
+            if (1 === preg_match('/^-[A-Za-z]*c[A-Za-z]*$/D', $word)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The `comm` of the nearest agent among $proc and its ancestors, following ppid through the members of the foreground
+     * group only (the walk stops at the first parent outside it), or null when there is none.
+     *
+     * @param array{pid: int, ppid: int, comm: string}             $proc
+     * @param array<int, array{pid: int, ppid: int, comm: string}> $group
+     */
+    private static function agentAncestor(array $proc, array $group): ?string
+    {
+        $seen = [];
+        while (!isset($seen[$proc['pid']])) {
+            if (\in_array($proc['comm'], self::AGENTS, true)) {
+                return $proc['comm'];
+            }
+            $seen[$proc['pid']] = true;
+            if (!isset($group[$proc['ppid']])) {
+                return null;
+            }
+            $proc = $group[$proc['ppid']];
+        }
+
+        return null;
     }
 
     /** Quotes removed and whitespace collapsed, so a command typed on the host compares with the same one inside a `bash -c`. */

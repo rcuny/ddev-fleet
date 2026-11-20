@@ -508,4 +508,62 @@ final class InstanceServiceTest extends JobTestCase
         self::assertSame($failed->id(), $retry->retryOf());
         self::assertSame($after, $this->instances->find('acme--develop')?->state());
     }
+
+    public function testProtectedInstanceRefusesDestroyUntilUnprotected(): void
+    {
+        $this->deploy(new DeployInput('acme'));
+        $this->markFinished('acme--develop');
+        $instance = $this->instances->find('acme--develop');
+        self::assertNotNull($instance);
+        $instance->protect('admin');
+
+        try {
+            $this->service()->request('destroy', new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin');
+            self::fail('expected Refused');
+        } catch (Refused $e) {
+            self::assertSame(Refused::PROTECTED, $e->reason);
+            self::assertStringContainsString('acme--develop is protected', $e->getMessage());
+        }
+        self::assertNotSame(InstanceState::Destroying, $instance->state());
+        self::assertSame([], $this->jobs->activeInstanceIds(['acme--develop']));
+
+        // The lock is about destroy only: stop is still allowed.
+        self::assertSame('stop', $this->service()->request('stop', new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin')[0]->type());
+        $this->markFinished('acme--develop');
+
+        $instance->unprotect();
+        self::assertSame('destroy', $this->service()->request('destroy', new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin')[0]->type());
+    }
+
+    public function testRetryOfADestroyIsRefusedWhileProtected(): void
+    {
+        $this->deploy(new DeployInput('acme'));
+        $this->markFinished('acme--develop');
+        $failed = $this->service()->request('destroy', new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin')[0];
+        $this->service->finish($failed, JobStatus::Failed, 1, 'boom');
+        $instance = $this->instances->find('acme--develop');
+        self::assertNotNull($instance);
+        $instance->changeState(InstanceState::Failed);
+        $instance->protect('admin');
+
+        try {
+            $this->service()->retry((int) $failed->id(), JobTrigger::Ui, 'admin');
+            self::fail('expected Refused');
+        } catch (Refused $e) {
+            self::assertSame(Refused::PROTECTED, $e->reason);
+        }
+
+        $instance->unprotect();
+        self::assertSame('destroy', $this->service()->retry((int) $failed->id(), JobTrigger::Ui, 'admin')->type());
+    }
+
+    public function testBulkDestroyWithOneProtectedInstanceCreatesNothing(): void
+    {
+        $this->deploy(new DeployInput('acme', count: 2, parallel: true));
+        $this->markFinished();
+        $this->instances->find('acme--develop-1')?->protect('admin');
+
+        $this->expectException(Refused::class);
+        $this->service()->request('destroy', new Selector(project: 'acme'), new OperationOptions(), JobTrigger::Ui, 'admin');
+    }
 }

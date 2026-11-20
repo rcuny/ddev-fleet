@@ -417,6 +417,67 @@ final class TmuxTest extends TestCase
         self::assertFalse($pane->isAgent());
     }
 
+    public function testDdevExecAgentWithBackgroundShellsIsAccepted(): void
+    {
+        // FLE-361: the agent's background Bash shells (and their own children) stay in its foreground process group.
+        $this->paneWindow();
+        $ps = self::PS_CLAUDE
+            ."   2100  1959  1953  1953 pts/0    bash         /bin/bash -c -l ci-wait 4242\n"
+            ."   2101  2100  1953  1953 pts/0    sleep        sleep 30\n"
+            ."   2200  1959  1953  1953 pts/0    bash         /bin/bash -c -l composer run gates\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+
+        self::assertTrue($pane?->isAgent());
+        self::assertSame('ddev>claude', $pane->command);
+    }
+
+    public function testDdevExecShellBesideTheAgentIsRefused(): void
+    {
+        // A shell in the foreground group that does not descend from the agent (a child of the wrapper) still fails closed.
+        $this->paneWindow();
+        $ps = self::PS_CLAUDE."   2300  1953  1953  1953 pts/0    bash         bash\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testShellUnderAnAgentOutsideTheForegroundGroupDoesNotCount(): void
+    {
+        // The walk follows only members of the foreground group. The wrapper has an agent child in the group (so it is not
+        // a leaf); the one failing leaf's parent is an agent in another group, which must not count.
+        $this->paneWindow();
+        $ps = "   1953     0  1953  1953 pts/0    bash         bash -c set -eu && ( claude --model sonnet \"/jira work OWA-123\" --allow-dangerously-skip-permissions )\n"
+            ."   1959  1953  1953  1953 pts/0    claude       claude --model sonnet /jira work OWA-123 --allow-dangerously-skip-permissions\n"
+            ."   1970  1953  1970  1953 pts/0    claude       claude\n"
+            ."   2400  1970  1953  1953 pts/0    bash         bash -c sleep 30\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testInteractiveShellUnderTheAgentIsRefused(): void
+    {
+        // A shell the agent left on the terminal (no -c) would read the text: refused even though claude is above it.
+        $this->paneWindow();
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, self::PS_CLAUDE."   2500  1959  1953  1953 pts/0    bash         bash -i\n"));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
+    public function testParentCycleInTheGroupFailsClosed(): void
+    {
+        $this->paneWindow();
+        $ps = self::PS_CLAUDE
+            ."   2600  2601  1953  1953 pts/0    sleep        sleep 1\n"
+            ."   2601  2600  1953  1953 pts/0    sleep        sleep 2\n"
+            ."   2602  2601  1953  1953 pts/0    sleep        sleep 3\n";
+        $this->ddevPane(self::DDEV_CMD, new CommandResult(0, $ps));
+
+        self::assertFalse($this->tmux->agentPane(self::ID, Pane::Tty2)?->isAgent());
+    }
+
     public function testTwoMatchingContainerSessionsAreRefused(): void
     {
         $this->paneWindow();
@@ -495,6 +556,8 @@ final class TmuxTest extends TestCase
         self::assertNotNull($pane);
         $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tclaude\t0\t99\n"));
         $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tclaude\t0\t99\n"));
+        // Third read: right before the retry Enter (only consumed when a retry happens).
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tclaude\t0\t99\n"));
 
         return $pane;
     }
@@ -518,6 +581,30 @@ final class TmuxTest extends TestCase
 
         self::assertSame(Tmux::SEND_RETRIED, $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true));
         self::assertCount(3, $this->tmuxCalls('send-keys'));
+    }
+
+    public function testSendToAgentSendsNoRetryEnterWhenTheAgentWentAwayDuringThePause(): void
+    {
+        $this->paneWindow();
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tclaude\t0\t99\n"));
+        $pane = $this->tmux->agentPane(self::ID, Pane::Tty2);
+        self::assertNotNull($pane);
+        $claude = new CommandResult(0, self::ID."\tclaude\t0\t99\n");
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], $claude);
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], $claude);
+        // Before the retry Enter the agent has exited: a shell is in the foreground.
+        $this->runner->expect(['tmux', '-L', 'fleet', 'display-message'], new CommandResult(0, self::ID."\tbash\t0\t99\n"));
+        $this->runner->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ Continue now\n"));
+
+        try {
+            $this->tmux->sendToAgent(self::ID, $pane, 'Continue now', true);
+            self::fail('The retry Enter must not be sent.');
+        } catch (WorkspaceException $e) {
+            self::assertStringContainsString('second Enter', $e->getMessage());
+        }
+
+        // The text and the first Enter only; no second Enter.
+        self::assertCount(2, $this->tmuxCalls('send-keys'));
     }
 
     public function testSendToAgentReportsUnconfirmedAfterOneRetry(): void

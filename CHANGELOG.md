@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-11-17
+
+### Fixed
+- **FLE-361: terminal input over the API no longer answers `409 pane_not_agent` while the agent runs background shells or
+  subagent commands.** A foreground process of the instance terminal now counts when it is the agent or descends from it
+  inside the same process group; a shell with no agent above it, or an interactive shell (no `-c`) under the agent, is
+  still refused.
+
+## [1.13.2] - 2026-11-17
+
+### Fixed
+- **FLE-346: a template's Mailpit option now takes effect on existing instances.** Turning Mailpit on or off (`fleet template:update --mailpit=yes|no` or the admin template form) rewrites the Caddy sites of the project's existing instances, so the `mailpit--<instance>` route appears or disappears without a redeploy or `fleet port:refresh` (also closes FLE-353). If Caddy refuses a site, the template change is kept and a warning names the retry command.
+
 ## [1.13.1] - 2026-11-16
 
 ### Fixed
@@ -1649,7 +1662,9 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.13.3...HEAD
+[1.13.3]: https://github.com/rcuny/ddev-fleet/compare/v1.13.2...v1.13.3
+[1.13.2]: https://github.com/rcuny/ddev-fleet/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/rcuny/ddev-fleet/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/rcuny/ddev-fleet/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/rcuny/ddev-fleet/compare/v1.12.1...v1.12.2

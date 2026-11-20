@@ -101,6 +101,9 @@ final class InstanceService
 
         $instances = $this->resolve($selector);
         $template = 'redeploy' === $op ? $this->redeployTemplate($instances, $options) : null;
+        if ('destroy' === $op) {
+            self::refuseIfProtected($instances);
+        }
         $this->refuseIfBusy($instances);
 
         $bulk = \count($instances) > 1;
@@ -147,6 +150,9 @@ final class InstanceService
         $this->jobService->assertRetryable($failed);
         $id = $failed->instanceId() ?? throw new Refused('This job belongs to no instance and cannot be retried.');
         $instance = $this->instances->find($id) ?? throw NotFound::instance($id);
+        if ('destroy' === $failed->type()) {
+            self::refuseIfProtected([$instance]);
+        }
         $this->refuseIfBusy([$instance]);
 
         // A start or stop has no transitional state: the instance stays as it was until the job's outcome is known.
@@ -165,6 +171,21 @@ final class InstanceService
             return $this->jobService->retry($failed, $by, $trigger);
         } catch (UniqueConstraintViolationException) {
             throw self::busyAtTheSameTime();
+        }
+    }
+
+    /**
+     * A protected instance is never destroyed (FLE-363): the whole request is refused and nothing is created.
+     *
+     * @param list<Instance> $instances
+     *
+     * @throws Refused
+     */
+    public static function refuseIfProtected(array $instances): void
+    {
+        $locked = array_map(static fn (Instance $i): string => $i->id(), array_values(array_filter($instances, static fn (Instance $i): bool => $i->isProtected())));
+        if ([] !== $locked) {
+            throw new Refused(1 === \count($locked) ? \sprintf('Instance %s is protected; remove the protection on its page first. Nothing was destroyed.', $locked[0]) : \sprintf('Instances %s are protected; remove the protection on their pages first. Nothing was destroyed.', implode(', ', $locked)), 0, Refused::PROTECTED);
         }
     }
 

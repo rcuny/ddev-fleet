@@ -71,6 +71,9 @@ final readonly class AuditLog
 
     /** Terminal input the API carried out; the subject holds the instance, pane, foreground command, length and the call id (the text is in `api_call`). */
     public const string API_TERMINAL_WRITE = 'api.terminal.write';
+    /** An admin protected an instance against destroy or removed the protection; the subject is `<id>/on|off` (FLE-363). */
+    public const string INSTANCE_PROTECT = 'instance.protect';
+
     /** An admin turned a project's API terminal input on or off. */
     public const string PROJECT_API_TERMINAL = 'project.api-terminal';
 

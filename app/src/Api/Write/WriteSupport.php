@@ -43,7 +43,9 @@ final readonly class WriteSupport
         } catch (NotFound) {
             throw ApiProblem::notFound();
         } catch (Refused $e) {
-            throw ApiProblem::conflict(Refused::BUSY === $e->reason ? 'instance_busy' : 'refused', $e->getMessage());
+            throw ApiProblem::conflict(match ($e->reason) {
+                Refused::BUSY => 'instance_busy', Refused::PROTECTED => 'instance_protected', default => 'refused',
+            }, $e->getMessage());
         }
     }
 

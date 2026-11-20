@@ -106,6 +106,7 @@ final readonly class InstanceController
             'created_at' => $i->createdAt()->format(\DATE_ATOM),
             'deployed_at' => $i->deployedAt()?->format(\DATE_ATOM),
             'last_observed_at' => $i->lastObservedAt()?->format(\DATE_ATOM),
+            'protected' => $i->isProtected(),
             'busy' => null === $busyJob ? null : ['job_id' => $busyJob],
         ];
     }
