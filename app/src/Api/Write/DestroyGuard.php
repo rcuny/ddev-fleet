@@ -20,6 +20,9 @@ final class DestroyGuard
         if (self::PROTECTED_LABEL === $instance->label()) {
             throw ApiProblem::conflict('protected_instance', 'The main instance of a project is protected and cannot be destroyed over the API.');
         }
+        if ($instance->isProtected()) {
+            throw ApiProblem::conflict('instance_protected', 'The instance is protected; an admin must remove the protection on its page first.');
+        }
         if (null === $ifMatch || '' === trim($ifMatch, ' "')) {
             throw ApiProblem::ifMatchRequired();
         }

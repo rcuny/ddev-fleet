@@ -116,4 +116,22 @@ final class DestroyJobTest extends InstanceJobTestCase
         }
         self::assertSame(['caddy validate', 'caddy reload', 'ddev delete', 'caddy validate', 'caddy reload'], $this->commandNames());
     }
+
+    public function testProtectedInstanceIsNotRemovedByAJobQueuedBeforeTheLock(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Destroying);
+        $dir = $this->checkout($instance);
+        $job = $this->job('destroy', $instance);
+        $instance->protect('admin');
+
+        try {
+            $this->destroy($job);
+            self::fail('expected a failure');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('protected', $e->getMessage());
+        }
+
+        self::assertDirectoryExists($dir);
+        self::assertNotNull($this->instances->find('acme--main'));
+    }
 }

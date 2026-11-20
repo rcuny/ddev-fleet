@@ -361,6 +361,51 @@ final class ApiWriteTest extends AdminTestCase
         self::assertResponseStatusCodeSame(202);
     }
 
+    public function testProtectedInstanceRefusesDestroyOnSingleBatchAndRetry(): void
+    {
+        $token = $this->issue([ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);
+        $repository = new InstanceRepository($this->em());
+        $instance = $repository->find('acme--i1');
+        self::assertNotNull($instance);
+        $created = $instance->createdAt()->format(\DATE_ATOM);
+        $instance->protect('admin');
+        $repository->save($instance);
+
+        $body = $this->call('DELETE', '/api/v1/instances/acme--i1', $token, '', ['HTTP_IF_MATCH' => '"'.$created.'"']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('instance_protected', $body['code']);
+
+        $body = $this->call('POST', '/api/v1/instances:destroy-batch', $token, json_encode(['ids' => ['acme--i1'], 'if_match' => ['acme--i1' => $created]], \JSON_THROW_ON_ERROR));
+        self::assertResponseStatusCodeSame(207);
+        self::assertFalse($body['results'][0]['accepted']);
+        self::assertSame('instance_protected', $body['results'][0]['code']);
+        self::assertSame(409, $body['results'][0]['status']);
+
+        $failed = $this->failedJob('acme', 'destroy');
+        $body = $this->call('POST', '/api/v1/jobs/'.$failed->id().'/retry', $token, '', ['HTTP_IF_MATCH' => '"'.$created.'"']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('instance_protected', $body['code']);
+
+        // Stop is not affected by the lock, and nothing was queued for destroy.
+        self::assertSame(1, (int) $this->em()->createQuery(\sprintf('SELECT COUNT(j.id) FROM %s j', Job::class))->getSingleScalarResult());
+    }
+
+    public function testInstanceJsonCarriesTheReadOnlyProtectedFlag(): void
+    {
+        $token = $this->issue([ApiScope::Read]);
+        $body = $this->call('GET', '/api/v1/instances/acme--i1', $token);
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($body['protected']);
+
+        $repository = new InstanceRepository($this->em());
+        $instance = $repository->find('acme--i1');
+        self::assertNotNull($instance);
+        $instance->protect('admin');
+        $repository->save($instance);
+        $body = $this->call('GET', '/api/v1/instances/acme--i1', $token);
+        self::assertTrue($body['protected']);
+    }
+
     /**
      * SR3, wildcard tokens: a `*` project list is read-only. It cannot be issued with write scopes, and a read-only
      * wildcard token is refused on every write endpoint.

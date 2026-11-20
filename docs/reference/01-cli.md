@@ -604,7 +604,7 @@ fleet instance:deploy [--branch BRANCH] [--label LABEL] [--count COUNT] [--paral
 
 ### fleet instance:destroy
 
-Destroy instances: their containers, database and checkout.
+Destroy instances: their containers, database and checkout (a protected instance is refused).
 
 ```
 fleet instance:destroy [--all] [--project PROJECT] [--state STATE] [-y|--yes] [--detach] [--format FORMAT] [--json] [--] [<id>...]

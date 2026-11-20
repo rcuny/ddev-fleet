@@ -625,7 +625,7 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
     Conflict:
-      description: The instance is busy with another job (`instance_busy`), or it is protected and cannot be destroyed (`protected_instance`).
+      description: The instance is busy with another job (`instance_busy`), or it is protected and cannot be destroyed (`protected_instance` for a project's main instance, `instance_protected` for an instance an admin locked).
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -670,7 +670,7 @@ components:
         detail: {type: string}
         code:
           type: string
-          description: "Machine-readable: capacity_full, instance_busy, scope_missing, project_not_allowed, rate_limited, protected_instance, stale_if_match, validation_failed, invalid_filter, ..."
+          description: "Machine-readable: capacity_full, instance_busy, scope_missing, project_not_allowed, rate_limited, protected_instance, instance_protected, stale_if_match, validation_failed, invalid_filter, ..."
         request_id: {type: string}
         errors: {type: object, additionalProperties: {type: string}, description: "Only on validation_failed."}
         verdict: {type: object, description: "Only on capacity_full."}
@@ -702,7 +702,7 @@ components:
         finished_at: {type: [string, "null"], format: date-time}
     Instance:
       type: object
-      required: [id, project, label, state, branch, template, head, ram_mib, requested_by, url, created_at, deployed_at, last_observed_at, busy]
+      required: [id, project, label, state, branch, template, head, ram_mib, requested_by, url, created_at, deployed_at, last_observed_at, protected, busy]
       properties:
         id: {type: string}
         project: {type: string}
@@ -717,6 +717,7 @@ components:
         created_at: {type: string, format: date-time}
         deployed_at: {type: [string, "null"], format: date-time}
         last_observed_at: {type: [string, "null"], format: date-time}
+        protected: {type: boolean, description: "True while an admin has locked the instance against destroy. Read-only: there is no API to change it."}
         busy:
           type: [object, "null"]
           required: [job_id]
