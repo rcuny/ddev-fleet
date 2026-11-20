@@ -17,6 +17,8 @@ use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Instances\InstanceIsolation;
+use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DomCrawler\Crawler;
@@ -827,6 +829,26 @@ final class InstanceControllerTest extends AdminTestCase
 
         self::assertResponseStatusCodeSame(403);
         self::assertFalse($this->protected());
+    }
+
+    public function testShowPageHasAUsageLimitBadgeOnlyWhenTheAgentPaneShowsTheDialog(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $runner = self::getContainer()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        $panes = "%1\t0\t0\t50\t200\tsidebar\tsh -c fleet:tmux:sidebar\n%2\t52\t0\t70\t200\t\tbash\n%3\t124\t0\t70\t200\t\tbash\n";
+        $runner->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\nacme--i1\n"))
+            ->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, $panes))
+            ->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "limit reached ∙ resets 3pm (Europe/Paris)\nWhat do you want to do?\n1. Stop and wait for limit to reset\n2. Wait here, then continue automatically\n"));
+
+        $page = $this->open('/instances/acme--i1');
+        self::assertCount(1, $page->filter('[data-testid=usage-limit-badge]'));
+        self::assertStringContainsString('Usage limit reached (resets ', $page->filter('[data-testid=usage-limit-badge]')->text());
+
+        $runner->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\nacme--i1\n"))
+            ->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, $panes))
+            ->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n"));
+        self::assertCount(0, $this->open('/instances/acme--i1')->filter('[data-testid=usage-limit-badge]'));
     }
 
     public function testProtectedInstanceShowsABadgeAndNoDestroyButton(): void

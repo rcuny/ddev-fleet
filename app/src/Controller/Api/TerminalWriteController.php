@@ -126,6 +126,13 @@ final readonly class TerminalWriteController
             throw ApiProblem::conflict('pane_not_agent', 'The pane is not running the agent; terminal input is only sent to an agent, never to a shell.');
         }
 
+        $limited = $this->tmux->usageLimitOfAgent($target);
+        if (null !== $limited) {
+            $this->deny($token->tokenId(), $token->getUserIdentifier(), 'usage_limited', $id.' '.$paneName, $ip);
+
+            throw new ApiProblem(409, 'usage_limited', 'The agent is at its usage limit and shows a dialog; nothing was typed.'.(null === $limited->resetsAt ? '' : ' It resets at '.$limited->resetsAt.'.'), [], ['usage_limit_resets_at' => $limited->resetsAt]);
+        }
+
         // Evidence and audit first: no record, no keys.
         $call = new ApiCall($token->tokenId(), $token->getUserIdentifier(), 'POST terminal', $id, $paneName, $target->command, $ip, \strlen($text), hash('sha256', $text), $this->masker->mask($text), $enter, new \DateTimeImmutable());
         try {

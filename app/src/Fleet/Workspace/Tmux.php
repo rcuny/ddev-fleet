@@ -433,6 +433,39 @@ final readonly class Tmux
     }
 
     /**
+     * The usage-limit dialog of the agent pane (FLE-368), read from a plain capture of its last 30 lines, or null when the pane
+     * does not show it, does not exist or cannot be read.
+     *
+     * @throws WorkspaceException
+     */
+    public function usageLimit(string $instanceId, Pane $pane): ?UsageLimit
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane || !\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::shellFor($this->panes($instanceId), $pane);
+        if (null === $target) {
+            return null;
+        }
+
+        return $this->usageLimitOf($target->id);
+    }
+
+    /** The same read for a pane {@see agentPane()} just found: no second lookup of the window between the check and the keys. */
+    public function usageLimitOfAgent(AgentPane $pane): ?UsageLimit
+    {
+        return $this->usageLimitOf($pane->id);
+    }
+
+    private function usageLimitOf(string $paneId): ?UsageLimit
+    {
+        $result = $this->tmux(['capture-pane', '-p', '-J', '-t', $paneId, '-S', '-30']);
+
+        return $result->isSuccess() ? UsageLimit::detect($result->stdout) : null;
+    }
+
+    /**
      * @return array{window: string, command: string, dead: bool, pid: string}|null
      */
     private function paneState(string $paneId): ?array

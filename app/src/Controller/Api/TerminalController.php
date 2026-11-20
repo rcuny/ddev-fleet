@@ -78,6 +78,11 @@ final readonly class TerminalController
         if (null === $raw) {
             throw ApiProblem::notFound('That instance has no such terminal pane.');
         }
+        try {
+            $limited = $this->tmux->usageLimit($id, $pane);
+        } catch (WorkspaceException) {
+            $limited = null;
+        }
         $clean = $this->cleaner->clean($raw);
         $this->audit->record(
             $token->getUserIdentifier(),
@@ -93,6 +98,8 @@ final readonly class TerminalController
             'captured_at' => new \DateTimeImmutable()->format(\DATE_ATOM),
             'text' => $clean['text'],
             'input' => $this->tmux->agentInput($id, $pane),
+            'usage_limited' => null !== $limited,
+            'usage_limit_resets_at' => $limited?->resetsAt,
         ]);
     }
 }

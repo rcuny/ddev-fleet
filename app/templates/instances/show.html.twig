@@ -6,6 +6,7 @@
     <twig:PageHeader :title="instance.id" :description="instance.project.name ~ ' · ' ~ instance.branch">
         <twig:block name="actions">
             {% if instance.isProtected %}<twig:Badge variant="secondary" data-testid="protected-badge"><twig:ux:icon name="lucide:lock" />Protected</twig:Badge>{% endif %}
+            {% if usageLimit %}<twig:Badge variant="destructive" data-testid="usage-limit-badge"><twig:ux:icon name="lucide:hourglass" />Usage limit reached{% if usageLimit.resetsAt %} (resets {{ usageLimit.resetsAt }}){% endif %}</twig:Badge>{% endif %}
             {% if url and instance.state.value == 'running' %}
                 <twig:Button as="a" href="{{ url }}" target="_blank" rel="noopener noreferrer" class="h-11 md:h-8" data-testid="open-site">
                     <twig:ux:icon name="lucide:external-link" />
