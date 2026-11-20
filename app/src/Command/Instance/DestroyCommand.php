@@ -15,6 +15,7 @@ use App\Domain\Job\JobTrigger;
 use App\Fleet\Instances\InstanceService;
 use App\Fleet\Instances\OperationOptions;
 use App\Fleet\Instances\Selector;
+use App\Fleet\Projects\Refused;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -48,6 +49,7 @@ final class DestroyCommand extends AttachedCommand
             // FLE-363: a protected instance is refused and reported by name; the others still go ahead. There is no CLI unlock.
             $locked = array_values(array_filter($resolved, static fn (Instance $i): bool => $i->isProtected()));
             $allowed = array_values(array_filter($resolved, static fn (Instance $i): bool => !$i->isProtected()));
+            $refusedRows = array_map(static fn (Instance $i): array => ['id' => $i->id(), 'reason' => 'protected'], $locked);
             if ([] !== $locked) {
                 $stderr = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
                 foreach ($locked as $instance) {
@@ -56,6 +58,15 @@ final class DestroyCommand extends AttachedCommand
                     }
                 }
                 if ([] === $allowed) {
+                    if ($out->isJson()) {
+                        try {
+                            InstanceService::refuseIfProtected($locked);
+                        } catch (Refused $refused) {
+                            $out->document(['error' => $refused->getMessage(), 'fields' => (object) [], 'refused' => $refusedRows]);
+
+                            return JsonOutput::REFUSED;
+                        }
+                    }
                     InstanceService::refuseIfProtected($locked);
                 }
             }
@@ -63,7 +74,7 @@ final class DestroyCommand extends AttachedCommand
             InstanceOptions::confirm($input, $output, $out, $selector, \count($allowed));
             $ids = array_map(static fn (Instance $i): string => $i->id(), $allowed);
             $jobs = $this->instances->request('destroy', new Selector(ids: $ids), new OperationOptions(), JobTrigger::Cli, CliRequester::name());
-            $code = $this->attached->handle($jobs, true === $input->getOption('detach'), $out, $output);
+            $code = $this->attached->handle($jobs, true === $input->getOption('detach'), $out, $output, null, [] === $refusedRows ? [] : ['refused' => $refusedRows]);
 
             return [] !== $locked && JsonOutput::OK === $code ? JsonOutput::REFUSED : $code;
         });

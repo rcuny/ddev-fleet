@@ -232,6 +232,22 @@ final class ApiWriteTest extends AdminTestCase
         self::assertSame('protected_instance', $body['code']);
     }
 
+    public function testMainLabelWinsOverTheProtectionLock(): void
+    {
+        $token = $this->issue([ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);
+        $repository = new InstanceRepository($this->em());
+        $main = $repository->find('acme--main');
+        self::assertNotNull($main);
+        $main->protect('admin');
+        $repository->save($main);
+
+        $body = $this->call('DELETE', '/api/v1/instances/acme--main', $token);
+
+        // Precedence (FLE-364): the `main` label is checked first, so a locked main instance answers protected_instance.
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('protected_instance', $body['code']);
+    }
+
     public function testIfMatchGuardsDestroy(): void
     {
         $token = $this->issue([ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);

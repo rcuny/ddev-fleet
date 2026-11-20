@@ -119,4 +119,32 @@ final class DestroyCommandTest extends InstanceCliTestCase
         self::assertStringContainsString('1 succeeded, 0 failed', $tester->getDisplay());
         self::assertSame(['acme--i1'], new InstanceRepository($this->em)->ids());
     }
+
+    public function testJsonReportsTheRefusedProtectedIds(): void
+    {
+        $this->instances([InstanceState::Running, InstanceState::Running]);
+        $this->em->getRepository(\App\Domain\Instance\Instance::class)->find('acme--i1')?->protect('admin');
+        $this->em->flush();
+
+        $tester = $this->command('fleet:instance:destroy', ['--all' => true, '--yes' => true, '--json' => true]);
+
+        self::assertSame(2, $tester->getStatusCode(), $tester->getDisplay());
+        $doc = json_decode($tester->getDisplay(), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertSame([['id' => 'acme--i1', 'reason' => 'protected']], $doc['refused']);
+        self::assertCount(1, $doc['jobs']);
+    }
+
+    public function testJsonReportsRefusedIdsWhenEverythingIsProtected(): void
+    {
+        $this->instances([InstanceState::Running]);
+        $this->em->getRepository(\App\Domain\Instance\Instance::class)->find('acme--i1')?->protect('admin');
+        $this->em->flush();
+
+        $tester = $this->command('fleet:instance:destroy', ['id' => ['acme--i1'], '--json' => true]);
+
+        self::assertSame(2, $tester->getStatusCode(), $tester->getDisplay());
+        $doc = json_decode($tester->getDisplay(), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertSame([['id' => 'acme--i1', 'reason' => 'protected']], $doc['refused']);
+        self::assertArrayHasKey('error', $doc);
+    }
 }
