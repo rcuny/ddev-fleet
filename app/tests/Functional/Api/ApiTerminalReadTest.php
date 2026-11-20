@@ -105,6 +105,38 @@ final class ApiTerminalReadTest extends AdminTestCase
         self::assertContains('%3', $call, 'tty2 is the second shell, never the sidebar');
     }
 
+    private const string LIMIT_DIALOG = "5-hour limit reached ∙ resets 3pm (Europe/Paris)\nWhat do you want to do?\n❯ 1. Stop and wait for limit to reset\n  2. Wait here, then continue automatically\n";
+
+    public function testReportsTheUsageLimitDialogAndItsResetTime(): void
+    {
+        $this->window('acme--fle-1', self::LIMIT_DIALOG)
+            ->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\nacme--fle-1\n"))
+            ->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, "%1\t0\t0\t50\t200\tsidebar\tsh -c fleet:tmux:sidebar\n%2\t52\t0\t70\t200\t\tbash\n%3\t124\t0\t70\t200\t\tbash\n"))
+            ->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, self::LIMIT_DIALOG));
+
+        $body = $this->get('/api/v1/instances/acme--fle-1/terminal');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertTrue($body['usage_limited']);
+        self::assertIsString($body['usage_limit_resets_at']);
+        self::assertStringContainsString('T15:00:00', $body['usage_limit_resets_at']);
+    }
+
+    public function testAPlainPaneIsNotUsageLimited(): void
+    {
+        $text = "I read about the usage limit in the docs.\n❯ \n";
+        $this->window('acme--fle-1', $text)
+            ->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\nacme--fle-1\n"))
+            ->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, "%1\t0\t0\t50\t200\tsidebar\tsh -c fleet:tmux:sidebar\n%2\t52\t0\t70\t200\t\tbash\n%3\t124\t0\t70\t200\t\tbash\n"))
+            ->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, $text));
+
+        $body = $this->get('/api/v1/instances/acme--fle-1/terminal');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($body['usage_limited']);
+        self::assertNull($body['usage_limit_resets_at']);
+    }
+
     public function testTty1IsTheFirstShell(): void
     {
         $this->window('acme--fle-1', 'x');

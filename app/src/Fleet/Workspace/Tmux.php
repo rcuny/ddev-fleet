@@ -365,6 +365,10 @@ final readonly class Tmux
         if (null === $state || $state['window'] !== $instanceId || $state['dead'] || null === $this->effectiveForeground($instanceId, $state)) {
             throw new WorkspaceException(\sprintf('The pane stopped running an agent %s; Enter was not sent.', $when));
         }
+        // A usage-limit dialog may have appeared during the pause: never submit text into it (FLE-368).
+        if (null !== $this->usageLimitOf($pane->id)) {
+            throw new WorkspaceException(\sprintf('The agent showed its usage-limit dialog %s; Enter was not sent.', $when));
+        }
     }
 
     private function pause(): void
@@ -430,6 +434,40 @@ final readonly class Tmux
         $input = null === $target ? null : $this->readInput($target->id);
 
         return null === $input ? null : ['text' => $input['text'], 'suggestion' => $input['ghost']];
+    }
+
+    /**
+     * The usage-limit dialog of the agent pane (FLE-368), read from a plain capture of its last 30 lines, or null when the pane
+     * does not show it, does not exist or cannot be read.
+     *
+     * @throws WorkspaceException
+     */
+    public function usageLimit(string $instanceId, Pane $pane): ?UsageLimit
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane || !\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::shellFor($this->panes($instanceId), $pane);
+        if (null === $target) {
+            return null;
+        }
+
+        return $this->usageLimitOf($target->id);
+    }
+
+    /** The same read for a pane {@see agentPane()} just found: no second lookup of the window between the check and the keys. */
+    public function usageLimitOfAgent(AgentPane $pane): ?UsageLimit
+    {
+        return $this->usageLimitOf($pane->id);
+    }
+
+    private function usageLimitOf(string $paneId): ?UsageLimit
+    {
+        // The visible screen only (no -S): a dialog that was dismissed but still sits in the scrollback is not the current state.
+        $result = $this->tmux(['capture-pane', '-p', '-J', '-t', $paneId]);
+
+        return $result->isSuccess() ? UsageLimit::detect($result->stdout) : null;
     }
 
     /**

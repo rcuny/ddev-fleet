@@ -132,6 +132,17 @@ final class OpenApiContractTest extends AdminTestCase
         self::assertSame($ids, array_values(array_unique($ids)), 'operationIds must be unique');
     }
 
+    public function testTerminalDescribesTheUsageLimitState(): void
+    {
+        $terminal = $this->spec()['paths']['/api/v1/instances/{id}/terminal'];
+        $props = $terminal['get']['responses']['200']['content']['application/json']['schema']['properties'];
+        self::assertArrayHasKey('usage_limited', $props);
+        self::assertArrayHasKey('usage_limit_resets_at', $props);
+        $conflict = $terminal['post']['responses']['409']['content']['application/problem+json']['schema']['properties'];
+        self::assertContains('usage_limited', $conflict['code']['enum']);
+        self::assertArrayHasKey('usage_limit_resets_at', $conflict);
+    }
+
     public function testSpecIsReadableByAnyReadTokenButNotAnonymously(): void
     {
         $this->call('GET', '/api/v1/openapi.json', token: 'flt_nope');

@@ -28,6 +28,9 @@ use App\Fleet\Jobs\LiveFeedCookie;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
+use App\Fleet\Workspace\Pane;
+use App\Fleet\Workspace\Tmux;
+use App\Fleet\Workspace\WorkspaceException;
 use App\Form\Instance\DeployType;
 use App\Form\Project\ValidationErrorMapper;
 use App\Security\CurrentActor;
@@ -71,6 +74,7 @@ final class InstanceController extends AbstractController
         private readonly ReauthGuard $reauth,
         private readonly AuditLog $audit,
         private readonly ClockInterface $clock,
+        private readonly Tmux $tmux,
     ) {
     }
 
@@ -263,7 +267,17 @@ final class InstanceController extends AbstractController
         } catch (DdevUnavailable) {
         }
 
+        // FLE-368: the agent pane's usage-limit dialog; nothing is shown when tmux does not answer or the instance is not running.
+        $usageLimit = null;
+        if ('running' === $instance->state()->value) {
+            try {
+                $usageLimit = $this->tmux->usageLimit($id, Pane::Tty2);
+            } catch (WorkspaceException) {
+            }
+        }
+
         $response = $this->render('instances/show.html.twig', [
+            'usageLimit' => $usageLimit,
             'links' => $links,
             'instance' => $instance,
             'url' => $this->siteUrl($instance),

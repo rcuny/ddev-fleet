@@ -191,6 +191,20 @@ final class ApiTerminalWriteTest extends AdminTestCase
         self::assertStringNotContainsString('rebase', $subject, 'the text lives in api_call, not in the audit line');
     }
 
+    public function testRefusedWith409WhenThePaneShowsTheUsageLimitDialog(): void
+    {
+        $this->window('acme--fle-1', ['claude', 'claude', 'claude']);
+        $this->runner()->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "5-hour limit reached ∙ resets 3pm (Europe/Paris)\nWhat do you want to do?\n❯ 1. Stop and wait for limit to reset\n  2. Wait here, then continue automatically\n"));
+
+        $body = $this->send('/api/v1/instances/acme--fle-1/terminal', ['pane' => 'tty2', 'text' => 'Please continue.', 'enter' => true]);
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('usage_limited', $body['code'] ?? $body['type'] ?? null);
+        self::assertStringContainsString('T15:00:00', (string) $body['usage_limit_resets_at']);
+        self::assertSame(0, $this->sendCalls(), 'nothing is typed into the dialog');
+        self::assertCount(0, $this->evidence());
+    }
+
     public function testEnterIsOnlySentWhenAsked(): void
     {
         $this->window('acme--fle-1');
