@@ -89,6 +89,10 @@ Fleet installs no Typesense server: each instance runs its own container from th
 | `FLEET_TYPESENSE_HOST` | `web_environment` | The instance host. |
 | `FLEET_TYPESENSE_PORT` | `web_environment` | Public port of the `typesense` entry (9108); https. |
 
+The flag and the `typesense` named port are one setting. `fleet project:update <project> --no-typesense` also unassigns the `typesense` port (re-assigning it with `--port=typesense` turns the flag back on), and the Network tab behaves the same. With the flag off a deploy or redeploy writes no `.ddev/.env` key and no Typesense variable.
+
+The key in `.ddev/.env` is not the project secret itself. The project secrets `TYPESENSE_API_KEY` and `FLEET_TYPESENSE_SEARCH_KEY` (also when set by hand with `fleet secret:set`) are the master keys. Each instance gets a derived 48-hex pair, the same in `.ddev/.env` and `web_environment`, and stable across redeploys of that instance. A compose file that needs the project's own value must read it from another variable.
+
 Registering the search key is retried for up to 60 seconds; if Typesense never answers, the job log gets `WARNING: typesense` and the deploy succeeds. Operator steps: switch on the project's Typesense flag, run `fleet port:firewall` and open the port, deploy.
 
 ## Isolation between instances

@@ -217,7 +217,7 @@ fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname H
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the project may use together: a number, or none for unlimited |  |
 | `--slots=VALUE` |  | Concurrent heavy runs across the project's templates: a number, or none for unlimited |  |
 | `--default-template=VALUE` |  | Template deployed when none is given (one of the project's templates) |  |
-| `--typesense / --no-typesense` |  | Give the project a Typesense search service (--no-typesense removes it) |  |
+| `--typesense / --no-typesense` |  | Give the project a Typesense search service (the flag and the "typesense" named port are one setting: --no-typesense also unassigns the port, --port=typesense turns the flag on) |  |
 | `--typesense-dashboard / --no-typesense-dashboard` |  | Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off) |  |
 | `--container-ssh / --no-container-ssh` |  | Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it) |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: default-branch, default-template, hostnames, ports, issue-id-regexp, display-submodule-branch (repeat for several) |  |
