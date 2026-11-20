@@ -94,6 +94,10 @@ class Project
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $slots = null;
 
+    /** Days after which a `ci-` instance of the project is destroyed by the daily retention pass; null = off (FLE-367). */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $ciRetentionDays = null;
+
     /** @var Collection<int, NamedPort> */
     #[ORM\ManyToMany(targetEntity: NamedPort::class)]
     #[ORM\JoinTable(name: 'project_port')]
@@ -316,6 +320,17 @@ class Project
     {
         $this->cpuThreads = $cpuThreads;
         $this->slots = $slots;
+        $this->touch($now);
+    }
+
+    public function ciRetentionDays(): ?int
+    {
+        return $this->ciRetentionDays;
+    }
+
+    public function changeCiRetentionDays(?int $days, ?\DateTimeImmutable $now = null): void
+    {
+        $this->ciRetentionDays = $days;
         $this->touch($now);
     }
 

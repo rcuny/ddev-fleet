@@ -140,6 +140,35 @@ final class HostCapacityPageTest extends HostPageTestCase
         self::assertSame([null, null], [$project->cpuThreads(), $project->slots()]);
     }
 
+    public function testCapacityTabSetsAndClearsTheCiRetention(): void
+    {
+        $this->projects()->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
+        $retention = static fn (): ?int => new \App\Domain\Project\ProjectRepository(self::getContainer()->get(\Doctrine\ORM\EntityManagerInterface::class))->findByName('blog')?->ciRetentionDays();
+
+        $crawler = $this->open('/admin/projects/blog/capacity');
+        self::assertCount(1, $crawler->filter('[data-testid=project-ci-retention-field]'));
+        $this->client->submit($crawler->selectButton('Save')->form(['capacity[ciRetentionDays]' => '14']));
+        self::assertResponseRedirects();
+        $this->em()->clear();
+        self::assertSame(14, $retention());
+
+        // Saving the Source tab keeps it.
+        $source = $this->open('/admin/projects/blog/source');
+        $this->client->submit($source->selectButton('Save')->form(['project[defaultBranch]' => 'main']));
+        self::assertResponseRedirects();
+        $this->em()->clear();
+        self::assertSame(14, $retention());
+
+        $this->client->submit($this->client->request('GET', '/admin/projects/blog/capacity')->selectButton('Save')->form(['capacity[ciRetentionDays]' => '0']));
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('from 1', $this->body());
+
+        $this->client->submit($this->client->request('GET', '/admin/projects/blog/capacity')->selectButton('Save')->form(['capacity[ciRetentionDays]' => '']));
+        self::assertResponseRedirects();
+        $this->em()->clear();
+        self::assertNull($retention());
+    }
+
     public function testSourceTabNoLongerCarriesTheCaps(): void
     {
         $this->projects()->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git', cpuThreads: 6, slots: 2));
