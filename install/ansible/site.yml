@@ -36,6 +36,8 @@
       tags: [fleet_user]
     - role: shell
       tags: [shell]
+    - role: host_tmp
+      tags: [host_tmp]
     - role: ddev
       tags: [ddev]
     - role: caddy

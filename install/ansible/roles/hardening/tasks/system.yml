@@ -83,9 +83,10 @@
     - name: Add the missing options
       ansible.builtin.set_fact:
         hardening_tmp_opts: >-
-          {{ (hardening_tmp_now.stdout | trim | split(',') | select | list
-              + (['nosuid', 'nodev', 'noexec'] | difference(hardening_tmp_now.stdout | trim | split(','))))
-             | join(',') }}
+          {%- set now = hardening_tmp_now.stdout | trim | split(',') | select | list -%}
+          {%- set wanted = now + (['nosuid', 'nodev', 'noexec'] | difference(now)) -%}
+          {%- set size = ['size=' ~ fleet_tmp_size_mb ~ 'm'] if fleet_tmp_size_mb | int > 0 else (now | select('match', '^size=') | list) -%}
+          {{ ((wanted | reject('match', '^size=') | list) + size) | join(',') }}
       when: hardening_tmp_target.stdout | trim == '/tmp' and hardening_tmp_now.stdout | trim | length > 0
 
     - name: Say when /tmp is left alone

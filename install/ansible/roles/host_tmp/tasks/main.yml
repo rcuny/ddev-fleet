@@ -1,0 +1,76 @@
+---
+# FLE-369: Debian 13 mounts /tmp as a tmpfs sized at half of the RAM (systemd tmp.mount, size=50%). Files an admin
+# copies there live in RAM; on 2026-11-20 about 28 GB of SQL dumps filled a 64 GB host and made it unreachable.
+# This role caps that tmpfs (fleet_tmp_size_mb, default 4096) and applies the cap to the running mount when it fits.
+# Only when /tmp is its own tmpfs: a host with /tmp on disk is left alone, and so is fleet_tmp_size_mb: 0.
+- name: Cap the /tmp tmpfs
+  when: fleet_tmp_size_mb | int > 0
+  block:
+    - name: What is mounted at /tmp?
+      ansible.builtin.command: findmnt -no TARGET,FSTYPE /tmp
+      register: host_tmp_mount
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Is it a tmpfs of its own?
+      ansible.builtin.set_fact:
+        host_tmp_is_tmpfs: "{{ host_tmp_mount.stdout | trim | split() == ['/tmp', 'tmpfs'] }}"
+
+    - name: Say when /tmp is left alone
+      ansible.builtin.debug:
+        msg: /tmp is not a tmpfs of its own on this host; leaving it alone
+      when: not host_tmp_is_tmpfs | bool
+
+    - name: Size drop-in for tmp.mount
+      when: host_tmp_is_tmpfs | bool
+      block:
+        - name: Directory
+          ansible.builtin.file:
+            path: /etc/systemd/system/tmp.mount.d
+            state: directory
+            mode: "0755"
+            owner: root
+            group: root
+
+        # Sorts before the hardening role's override.conf, which derives its options from the effective ones.
+        - name: Size drop-in
+          ansible.builtin.template:
+            src: tmp-size.conf.j2
+            dest: /etc/systemd/system/tmp.mount.d/00-fleet-size.conf
+            mode: "0644"
+            owner: root
+            group: root
+          register: host_tmp_dropin
+
+        - name: Load the drop-in before anything reads the effective options  # noqa: no-handler
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: host_tmp_dropin is changed
+
+        - name: Size and use of the running /tmp, in bytes
+          ansible.builtin.command: df -B1 --output=size,used /tmp
+          register: host_tmp_df
+          changed_when: false
+          check_mode: false
+
+        - name: Does the running mount need the new size, and does it fit?
+          ansible.builtin.set_fact:
+            host_tmp_remount: >-
+              {{ (host_tmp_df.stdout_lines[-1] | split())[0] | int != fleet_tmp_size_mb | int * 1048576
+                 and (host_tmp_df.stdout_lines[-1] | split())[1] | int < fleet_tmp_size_mb | int * 1048576 }}
+            host_tmp_too_full: >-
+              {{ (host_tmp_df.stdout_lines[-1] | split())[0] | int != fleet_tmp_size_mb | int * 1048576
+                 and (host_tmp_df.stdout_lines[-1] | split())[1] | int >= fleet_tmp_size_mb | int * 1048576 }}
+
+        - name: Resize the running /tmp
+          ansible.builtin.command: mount -o remount,size={{ fleet_tmp_size_mb }}m /tmp  # noqa: command-instead-of-module
+          changed_when: true
+          when: host_tmp_remount | bool
+
+        - name: Say when /tmp holds more than the cap (the cap then applies at the next boot)
+          ansible.builtin.debug:
+            msg: >-
+              /tmp holds more than {{ fleet_tmp_size_mb }} MB right now, so the running mount keeps its size until the next boot.
+              Move the large files out of /tmp (to /var/tmp or /srv) and reboot, or run: mount -o remount,size={{ fleet_tmp_size_mb }}m /tmp
+          when: host_tmp_too_full | bool

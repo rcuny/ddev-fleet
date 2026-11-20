@@ -75,6 +75,16 @@ final class HostCapacityPageTest extends HostPageTestCase
         self::assertStringContainsString('Overcommitted: 47 of 46 threads', $this->text($crawler, 'capacity-overcommit'));
     }
 
+    public function testTheShmemWarningShowsOnThePage(): void
+    {
+        $crawler = $this->open('/admin/host?tab=capacity');
+        self::assertCount(0, $crawler->filter('[data-testid=capacity-warning-shmem_high]'));
+
+        file_put_contents(getenv('FLEET_HOME').'/test-meminfo', "MemTotal: 65536000 kB\nShmem: 40000000 kB\n");
+        $crawler = $this->open('/admin/host?tab=capacity');
+        self::assertStringContainsString('Shared memory', $this->text($crawler, 'capacity-warning-shmem_high'));
+    }
+
     public function testReserveAndInstanceCapAreSavedAndValidated(): void
     {
         $this->submit('capacity', 'Save', ['host_capacity[reserve]' => '4', 'host_capacity[maxInstances]' => '40']);
