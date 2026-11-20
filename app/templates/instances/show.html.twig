@@ -5,6 +5,7 @@
 {% block content %}
     <twig:PageHeader :title="instance.id" :description="instance.project.name ~ ' · ' ~ instance.branch">
         <twig:block name="actions">
+            {% if instance.isProtected %}<twig:Badge variant="secondary" data-testid="protected-badge"><twig:ux:icon name="lucide:lock" />Protected</twig:Badge>{% endif %}
             {% if url and instance.state.value == 'running' %}
                 <twig:Button as="a" href="{{ url }}" target="_blank" rel="noopener noreferrer" class="h-11 md:h-8" data-testid="open-site">
                     <twig:ux:icon name="lucide:external-link" />
@@ -90,7 +91,7 @@
                         <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: instance.id, action: 'start'}) }}">Start</twig:Button>
                     {% endif %}
                     <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: instance.id, action: 'redeploy'}) }}">Redeploy</twig:Button>
-                    {% if canDestroy %}
+                    {% if canDestroy and not instance.isProtected %}
                         <twig:Dialog id="destroy-instance" class="inline-block">
                             <twig:Dialog:Trigger>
                                 <twig:Button type="button" variant="destructive" class="h-11 md:h-8" {{ ...dialog_trigger_attrs }}>Destroy…</twig:Button>
@@ -111,6 +112,29 @@
                     {% endif %}
                 </form>
             </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card data-testid="instance-protection">
+            <twig:Card:Header>
+                <twig:Card:Title>Protection</twig:Card:Title>
+                <twig:Card:Description data-testid="protection-state">
+                    {% if instance.isProtected %}
+                        Protected against destroy since {{ instance.protectedAt|date('Y-m-d H:i') }} UTC{% if instance.protectedBy %} by {{ instance.protectedBy }}{% endif %}. Nothing can destroy it, over the API, in the web UI or on the command line, until an administrator removes the protection here.
+                    {% else %}
+                        Not protected. An administrator can lock the instance so that nothing destroys it by accident.
+                    {% endif %}
+                </twig:Card:Description>
+            </twig:Card:Header>
+            {% if is_granted('ROLE_ADMIN') %}
+                <twig:Card:Content>
+                    <form method="post" action="{{ path('instance_protection', {id: instance.id}) }}" data-turbo="false">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <input type="hidden" name="protect" value="{{ instance.isProtected ? '0' : '1' }}">
+                        <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="protection-toggle">{{ instance.isProtected ? 'Remove protection' : 'Protect' }}</twig:Button>
+                    </form>
+                    <p class="mt-2 text-sm text-ink-muted">Either change asks for your password again.</p>
+                </twig:Card:Content>
+            {% endif %}
         </twig:Card>
 
         {% if active %}

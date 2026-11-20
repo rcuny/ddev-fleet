@@ -92,4 +92,31 @@ final class DestroyCommandTest extends InstanceCliTestCase
         self::assertStringContainsString('1 succeeded, 0 failed', $tester->getDisplay());
         self::assertSame([], new InstanceRepository($this->em)->ids());
     }
+
+    public function testProtectedInstanceIsRefusedAndNothingIsRemoved(): void
+    {
+        $this->instances([InstanceState::Running]);
+        $this->em->getRepository(\App\Domain\Instance\Instance::class)->find('acme--i1')?->protect('admin');
+        $this->em->flush();
+
+        $tester = $this->command('fleet:instance:destroy', ['id' => ['acme--i1']]);
+
+        self::assertSame(2, $tester->getStatusCode());
+        self::assertStringContainsString('acme--i1 is protected', $tester->getErrorOutput().$tester->getDisplay());
+        self::assertSame(['acme--i1'], new InstanceRepository($this->em)->ids());
+    }
+
+    public function testMixedSelectorRefusesTheProtectedOneAndDestroysTheRest(): void
+    {
+        $this->instances([InstanceState::Running, InstanceState::Running]);
+        $this->em->getRepository(\App\Domain\Instance\Instance::class)->find('acme--i1')?->protect('admin');
+        $this->em->flush();
+
+        $tester = $this->command('fleet:instance:destroy', ['--all' => true, '--yes' => true]);
+
+        self::assertSame(2, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('acme--i1 is protected', $tester->getErrorOutput().$tester->getDisplay());
+        self::assertStringContainsString('1 succeeded, 0 failed', $tester->getDisplay());
+        self::assertSame(['acme--i1'], new InstanceRepository($this->em)->ids());
+    }
 }
