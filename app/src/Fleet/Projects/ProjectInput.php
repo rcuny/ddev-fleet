@@ -35,6 +35,7 @@ final readonly class ProjectInput
         public ?int $cpuThreads = null,
         public ?int $slots = null,
         public bool $typesenseDashboard = false,
+        public ?int $ciRetentionDays = null,
     ) {
     }
 
@@ -57,6 +58,7 @@ final readonly class ProjectInput
             $project->cpuThreads(),
             $project->slots(),
             $project->typesenseDashboard(),
+            $project->ciRetentionDays(),
         );
     }
 
@@ -100,6 +102,7 @@ final readonly class ProjectInput
             $this->cpuThreads,
             $this->slots,
             $this->typesenseDashboard,
+            $this->ciRetentionDays,
         );
     }
 

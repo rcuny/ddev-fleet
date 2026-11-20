@@ -11,7 +11,7 @@ use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
 /**
- * The Capacity tab of a project: its CPU threads and slots. Like ProjectType, the form carries no constraints; the
+ * The Capacity tab of a project: its CPU threads and slots, and the optional CI retention (FLE-367). Like ProjectType, the form carries no constraints; the
  * service validates and its messages are mapped onto the fields.
  *
  * @extends AbstractType<array<string, mixed>>
@@ -21,6 +21,12 @@ final class CapacityType extends AbstractType
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         self::addCapFields($builder, $options['allocatable']);
+        $builder->add('ciRetentionDays', IntegerType::class, [
+            'label' => 'CI retention (days)',
+            'required' => false,
+            'help' => 'Once a day, destroy this project\'s instances whose label starts with "ci-" and whose last deploy is older than this. Never a protected instance, one with a job queued or running, or main. Leave empty to keep them.',
+            'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'off'],
+        ]);
         $builder->add('save', SubmitType::class, ['label' => 'Save']);
     }
 

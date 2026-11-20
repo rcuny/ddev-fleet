@@ -472,7 +472,7 @@ final readonly class ProjectImporter
         $input = $this->projectInput($project, $keptDefault, $project['ports']);
         // Capacity is per host and not in the file: an update keeps what the host has.
         if (null !== $existing) {
-            $input = $input->with(['cpuThreads' => $existing->cpuThreads(), 'slots' => $existing->slots()]);
+            $input = $input->with(['cpuThreads' => $existing->cpuThreads(), 'slots' => $existing->slots(), 'ciRetentionDays' => $existing->ciRetentionDays()]);
         }
         if (null === $existing) {
             $this->projectService->create($input, false);

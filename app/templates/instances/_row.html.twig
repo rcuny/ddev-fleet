@@ -20,6 +20,11 @@
     <twig:Table:Cell class="block p-0 text-ink-muted md:table-cell md:p-2">
         {{ instance.ramMib is not null ? instance.ramMib ~ ' MiB' : '' }}
     </twig:Table:Cell>
+    <twig:Table:Cell class="block p-0 text-xs text-ink-muted md:table-cell md:p-2" data-testid="instance-age">
+        {%- set ageDays = (('now'|date('U')) - instance.createdAt.timestamp) // 86400 -%}
+        <span class="block" data-testid="instance-created">Created {{ instance.createdAt|date('Y-m-d H:i') }} UTC ({{ ageDays }} d)</span>
+        <span class="block" data-testid="instance-deployed">{{ instance.deployedAt ? 'Deployed ' ~ instance.deployedAt|date('Y-m-d H:i') ~ ' UTC' : 'Not deployed yet' }}</span>
+    </twig:Table:Cell>
     <twig:Table:Cell class="block p-0 md:table-cell md:p-2 md:text-end">
         <div class="flex flex-wrap items-center gap-2 md:justify-end">
             {% if url and running %}

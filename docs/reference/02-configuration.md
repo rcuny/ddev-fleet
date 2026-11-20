@@ -73,6 +73,7 @@ The browser and the commands apply the same rules and refuse a bad value with th
 | Submodule branch | Optional relative path (such as `web/modules/custom/blog`) whose branch the UI shows. |
 | Typesense, git over SSH in the container | Yes/no switches ([09-networking.md](09-networking.md#typesense-keys-and-environment), [agents guide](../guides/05-work-with-agents.md)). |
 | CPU threads, slots | Whole numbers of at least 1, or `none` ([10-capacity.md](10-capacity.md)). |
+| CI retention (`ci_retention_days`) | Whole days from 1 to 3650, or empty / `none` (the default) to keep every instance. Set on the project's **Capacity** tab or with `fleet project:update --ci-retention-days=N`; see [CI retention](10-capacity.md#ci-instance-retention). |
 | Issue id pattern | See below. |
 
 ### Template

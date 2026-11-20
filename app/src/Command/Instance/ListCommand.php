@@ -74,8 +74,8 @@ final class ListCommand extends Command
                     return;
                 }
                 $out->table(
-                    ['Id', 'State', 'Branch', 'Template', 'Head', 'RAM MiB', 'Deployed', 'Protected'],
-                    array_map(static fn (array $r): array => [$r['id'], $r['state'], $r['branch'], $r['template'], substr((string) $r['head'], 0, 8), $r['ramMib'] ?? '-', $r['deployedAt'] ?? '-', $r['protected'] ? 'yes' : ''], $rows),
+                    ['Id', 'State', 'Branch', 'Template', 'Head', 'RAM MiB', 'Created', 'Deployed', 'Protected'],
+                    array_map(static fn (array $r): array => [$r['id'], $r['state'], $r['branch'], $r['template'], substr((string) $r['head'], 0, 8), $r['ramMib'] ?? '-', $r['createdAt'], $r['deployedAt'] ?? '-', $r['protected'] ? 'yes' : ''], $rows),
                 );
             });
         });
@@ -110,6 +110,7 @@ final class ListCommand extends Command
             'template' => $i->templateName(),
             'head' => $i->headSha(),
             'ramMib' => $i->ramMib(),
+            'createdAt' => $i->createdAt()->format(\DATE_ATOM),
             'deployedAt' => $i->deployedAt()?->format(\DATE_ATOM),
             'protected' => $i->isProtected(),
         ];
