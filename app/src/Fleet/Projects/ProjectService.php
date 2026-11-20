@@ -14,6 +14,7 @@ use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\Projects\Rule\BranchName;
 use App\Fleet\Projects\Rule\Capacity;
+use App\Fleet\Projects\Rule\CiRetention;
 use App\Fleet\Projects\Rule\GitIdentity;
 use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\IssueIdPattern;
@@ -340,6 +341,10 @@ final readonly class ProjectService
             }
         }
 
+        if (null !== $error = CiRetention::error($input->ciRetentionDays)) {
+            $errors['ciRetentionDays'] = $error;
+        }
+
         return [$errors, $ports];
     }
 
@@ -393,5 +398,6 @@ final readonly class ProjectService
         $project->changeTypesenseDashboard($input->typesenseDashboard, $now);
         $project->changeContainerSsh($input->containerSsh, $now);
         $project->changeCapacity($input->cpuThreads, $input->slots, $now);
+        $project->changeCiRetentionDays($input->ciRetentionDays, $now);
     }
 }

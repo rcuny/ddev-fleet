@@ -267,15 +267,16 @@ final class ProjectController extends AbstractController
     {
         $project = $this->load($name);
         $allocatable = $this->allocatable->get();
-        $form = $this->createForm(CapacityType::class, ['cpuThreads' => $project->cpuThreads(), 'slots' => $project->slots()], ['allocatable' => $allocatable]);
+        $form = $this->createForm(CapacityType::class, ['cpuThreads' => $project->cpuThreads(), 'slots' => $project->slots(), 'ciRetentionDays' => $project->ciRetentionDays()], ['allocatable' => $allocatable]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
             $data = $this->formData($form);
-            // Start from what is stored so only the two caps change.
+            // Start from what is stored so only the caps and the CI retention change.
             $input = ProjectInput::fromProject($project)->with([
                 'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
                 'slots' => self::optionalInt($data['slots'] ?? null),
+                'ciRetentionDays' => self::optionalInt($data['ciRetentionDays'] ?? null),
             ]);
             try {
                 $this->projects->update($name, $input);

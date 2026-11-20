@@ -7,12 +7,12 @@ namespace App\Command\Support;
 use Symfony\Component\Console\Input\InputInterface;
 
 /**
- * The --cpu-threads and --slots options of the project and template commands: a whole number, or `none` for no value
+ * The --cpu-threads, --slots and --ci-retention-days options of the project and template commands: a whole number, or `none` for no value
  * (unlimited on a project, inherited on a template). Range rules belong to the services (Rule\Capacity).
  */
 final class CapacityOption
 {
-    private const array OPTIONS = ['cpu-threads' => 'cpuThreads', 'slots' => 'slots'];
+    private const array OPTIONS = ['cpu-threads' => 'cpuThreads', 'slots' => 'slots', 'ci-retention-days' => 'ciRetentionDays'];
 
     private function __construct()
     {

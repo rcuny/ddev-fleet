@@ -57,6 +57,7 @@ final class ProjectOptions
             ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs across the project\'s templates: a number, or none for unlimited')
         ;
         if ($update) {
+            $command->addOption('ci-retention-days', null, InputOption::VALUE_REQUIRED, 'Destroy the project\'s `ci-` instances whose last deploy is older than this many days (daily; never a protected or busy one, nor main): a number, or none to turn it off');
             $command
                 ->addOption('default-template', null, InputOption::VALUE_REQUIRED, 'Template deployed when none is given (one of the project\'s templates)')
                 ->addOption('typesense', null, InputOption::VALUE_NEGATABLE, 'Give the project a Typesense search service (the flag and the "typesense" named port are one setting: --no-typesense also unassigns the port, --port=typesense turns the flag on)')
