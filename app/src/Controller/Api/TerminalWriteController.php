@@ -142,7 +142,7 @@ final readonly class TerminalWriteController
         }
 
         try {
-            $this->tmux->sendToAgent($id, $target, $text, $enter);
+            $submit = $this->tmux->sendToAgent($id, $target, $text, $enter);
         } catch (WorkspaceException) {
             $this->finish($call, ApiCall::FAILED);
             // Keys may already have been typed before the send gave up: the owner is told all the same.
@@ -160,6 +160,7 @@ final readonly class TerminalWriteController
             'length' => \strlen($text),
             'sha256' => hash('sha256', $text),
             'enter' => $enter,
+            'submit' => $submit,
             'call' => $call->id(),
         ]);
     }
