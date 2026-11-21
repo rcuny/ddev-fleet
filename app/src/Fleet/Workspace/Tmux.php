@@ -32,6 +32,11 @@ final readonly class Tmux
     /** What the home window was called before 1.1.x; a window with that name is renamed. */
     public const string LEGACY_HOME_WINDOW = 'host';
     public const int SIDEBAR_WIDTH = 50;
+    /** What sendToAgent() reports: typed only (no Enter asked), submitted, submitted after a second Enter, or still in the input box. */
+    public const string SEND_TYPED = 'typed';
+    public const string SEND_SUBMITTED = 'submitted';
+    public const string SEND_RETRIED = 'retried';
+    public const string SEND_UNCONFIRMED = 'unconfirmed';
     /** The size a detached session starts with (tmux would pick 80x24); an attaching client resizes it. Also the session's `default-size`, so windows
      *  created while detached are not 80x24 either (FLE-187). */
     private const string DETACHED_WIDTH = '300';
@@ -64,6 +69,8 @@ final readonly class Tmux
         private string $console,
         private string $php = '/usr/bin/php8.4',
         private string $envFile = '/etc/ddev-fleet/fleet.env',
+        /** Pause between the typed text and Enter, and before the submit check (FLE-359). */
+        private int $submitDelayMicros = 300_000,
     ) {
     }
 
@@ -312,9 +319,14 @@ final readonly class Tmux
      * foreground. tmux cannot check and send atomically: what is left is the time between that read and the keystroke, a few
      * milliseconds (the residual risk is documented in docs/reference/15-api.md).
      *
+     * Enter is a separate keystroke after a short pause (FLE-359: text and Enter in one burst can reach Claude Code as a paste,
+     * where Enter is a newline). The pane is then read back: if the text is still in the input box, Enter is sent once more.
+     *
+     * @return self::SEND_*
+     *
      * @throws WorkspaceException
      */
-    public function sendToAgent(string $instanceId, AgentPane $pane, string $text, bool $enter): void
+    public function sendToAgent(string $instanceId, AgentPane $pane, string $text, bool $enter): string
     {
         self::assertId($instanceId);
         if ('' === $text || \strlen($text) > self::COMMAND_MAX || 1 === preg_match('/[\x00-\x1f\x7f]/', $text)) {
@@ -327,13 +339,135 @@ final readonly class Tmux
 
         $this->must(['send-keys', '-t', $pane->id, '-l', '--', $text], 'send the keys');
         if ($enter) {
+            $this->pause();
             // Again between the text and Enter: if the agent is gone, the text is left unsubmitted rather than run by a shell.
-            $after = $this->paneState($pane->id);
-            if (null === $after || $after['window'] !== $instanceId || $after['dead'] || null === $this->effectiveForeground($instanceId, $after)) {
-                throw new WorkspaceException('The pane stopped running an agent before Enter; Enter was not sent.');
-            }
+            $this->assertStillAgent($instanceId, $pane, 'before Enter');
             $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter');
+            $this->pause();
+            if (!$this->stillInInput($pane->id, $text)) {
+                return self::SEND_SUBMITTED;
+            }
+            // The retry Enter follows a pause too: the agent may have exited meanwhile, and a shell would run the typed text.
+            $this->assertStillAgent($instanceId, $pane, 'before the second Enter');
+            $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter again');
+            $this->pause();
+
+            return $this->stillInInput($pane->id, $text) ? self::SEND_UNCONFIRMED : self::SEND_RETRIED;
         }
+
+        return self::SEND_TYPED;
+    }
+
+    /** @throws WorkspaceException when the pane is no longer the instance's live agent pane (no Enter must follow) */
+    private function assertStillAgent(string $instanceId, AgentPane $pane, string $when): void
+    {
+        $state = $this->paneState($pane->id);
+        if (null === $state || $state['window'] !== $instanceId || $state['dead'] || null === $this->effectiveForeground($instanceId, $state)) {
+            throw new WorkspaceException(\sprintf('The pane stopped running an agent %s; Enter was not sent.', $when));
+        }
+        // A usage-limit dialog may have appeared during the pause: never submit text into it (FLE-368).
+        if (null !== $this->usageLimitOf($pane->id)) {
+            throw new WorkspaceException(\sprintf('The agent showed its usage-limit dialog %s; Enter was not sent.', $when));
+        }
+    }
+
+    private function pause(): void
+    {
+        if ($this->submitDelayMicros > 0) {
+            usleep($this->submitDelayMicros);
+        }
+    }
+
+    /** True when the last 40 characters of $text are still in the agent's input box (the capture could not be read: false). */
+    private function stillInInput(string $paneId, string $text): bool
+    {
+        $input = $this->readInput($paneId);
+        if (null === $input || $input['ghost']) {
+            return false;
+        }
+        $tail = mb_substr($text, -40);
+
+        return '' !== $tail && str_contains($input['text'], $tail);
+    }
+
+    /**
+     * What the agent's input box holds, from `capture-pane -e`: the last line that starts with the `❯` prompt. `ghost` is true when
+     * the text after it is dim or grey, which is how Claude Code draws its prompt suggestion (greyed, not typed; the capture without
+     * escapes cannot tell them apart, FLE-359). A heuristic on SGR codes: dim (2), bright black (90), or a grey 256/true colour.
+     *
+     * @return array{text: string, ghost: bool}|null null when there is no prompt line
+     */
+    private function readInput(string $paneId): ?array
+    {
+        $result = $this->tmux(['capture-pane', '-p', '-e', '-t', $paneId, '-S', '-12']);
+        if (!$result->isSuccess()) {
+            return null;
+        }
+        $found = null;
+        foreach (explode("\n", $result->stdout) as $line) {
+            if (1 === preg_match('/^((?:\e\[[0-9;]*m)*[│|]?\s*(?:\e\[[0-9;]*m)*)❯\s?(.*)$/u', $line, $m)) {
+                $found = $m[2];
+            }
+        }
+        if (null === $found) {
+            return null;
+        }
+        // Dim or grey SGR right at the start, after at most one cursor character (Claude Code draws the cursor on the first letter).
+        $ghost = 1 === preg_match('/^(?:\e\[[0-9;]*m)*(?:\e\[7m.\e\[(?:0|27)m)?(?:\e\[(?:0|27)?m)*\e\[(?:[0-9;]*;)?(?:2|90|38;5;2[3-5][0-9]|38;2;1[0-9]{2};1[0-9]{2};1[0-9]{2})(?:;[0-9;]*)?m/u', $found);
+        $plain = (string) preg_replace('/\e\[[0-9;]*[A-Za-z]/', '', $found);
+
+        return ['text' => rtrim($plain), 'ghost' => $ghost];
+    }
+
+    /**
+     * The agent's input box for the terminal read (FLE-359), or null when the pane has no prompt line or cannot be read.
+     *
+     * @return array{text: string, suggestion: bool}|null
+     */
+    public function agentInput(string $instanceId, Pane $pane): ?array
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane || !\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::shellFor($this->panes($instanceId), $pane);
+        $input = null === $target ? null : $this->readInput($target->id);
+
+        return null === $input ? null : ['text' => $input['text'], 'suggestion' => $input['ghost']];
+    }
+
+    /**
+     * The usage-limit dialog of the agent pane (FLE-368), read from a plain capture of its last 30 lines, or null when the pane
+     * does not show it, does not exist or cannot be read.
+     *
+     * @throws WorkspaceException
+     */
+    public function usageLimit(string $instanceId, Pane $pane): ?UsageLimit
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane || !\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::shellFor($this->panes($instanceId), $pane);
+        if (null === $target) {
+            return null;
+        }
+
+        return $this->usageLimitOf($target->id);
+    }
+
+    /** The same read for a pane {@see agentPane()} just found: no second lookup of the window between the check and the keys. */
+    public function usageLimitOfAgent(AgentPane $pane): ?UsageLimit
+    {
+        return $this->usageLimitOf($pane->id);
+    }
+
+    private function usageLimitOf(string $paneId): ?UsageLimit
+    {
+        // The visible screen only (no -S): a dialog that was dismissed but still sits in the scrollback is not the current state.
+        $result = $this->tmux(['capture-pane', '-p', '-J', '-t', $paneId]);
+
+        return $result->isSuccess() ? UsageLimit::detect($result->stdout) : null;
     }
 
     /**

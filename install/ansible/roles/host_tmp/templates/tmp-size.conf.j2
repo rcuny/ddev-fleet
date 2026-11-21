@@ -1,0 +1,5 @@
+# Installed by ddev-fleet (FLE-369): /tmp is a tmpfs, so it lives in RAM. Debian's default is half of the RAM.
+# Change the cap with fleet_tmp_size_mb in /etc/ddev-fleet/host-vars.yml (0 leaves /tmp alone). Takes effect at the next boot.
+# Undo: delete this file and reboot.
+[Mount]
+Options=mode=1777,strictatime,nosuid,nodev,size={{ fleet_tmp_size_mb }}m,nr_inodes=1m

@@ -57,9 +57,10 @@ final class ProjectOptions
             ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs across the project\'s templates: a number, or none for unlimited')
         ;
         if ($update) {
+            $command->addOption('ci-retention-days', null, InputOption::VALUE_REQUIRED, 'Destroy the project\'s `ci-` instances whose last deploy is older than this many days (daily; never a protected or busy one, nor main): a number, or none to turn it off');
             $command
                 ->addOption('default-template', null, InputOption::VALUE_REQUIRED, 'Template deployed when none is given (one of the project\'s templates)')
-                ->addOption('typesense', null, InputOption::VALUE_NEGATABLE, 'Give the project a Typesense search service (--no-typesense removes it)')
+                ->addOption('typesense', null, InputOption::VALUE_NEGATABLE, 'Give the project a Typesense search service (the flag and the "typesense" named port are one setting: --no-typesense also unassigns the port, --port=typesense turns the flag on)')
                 ->addOption('typesense-dashboard', null, InputOption::VALUE_NEGATABLE, 'Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off)')
                 ->addOption('container-ssh', null, InputOption::VALUE_NEGATABLE, 'Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it)')
                 ->addOption('unset', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Clear a value: '.implode(', ', array_keys(self::UNSET)).' (repeat for several)')

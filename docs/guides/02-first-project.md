@@ -56,6 +56,10 @@ More: [troubleshooting](../reference/13-troubleshooting.md).
 - [Share and access](06-share-and-access.md)
 - [Configuration reference](../reference/02-configuration.md)
 
+## Protect an instance from destroy (optional)
+
+If an instance must not disappear by accident, an administrator can lock it. Open the instance page, find the **Protection** section and choose **Protect**; Fleet asks for your password again. A protected instance shows a lock badge in the list and on its page, and its **Destroy** buttons are gone. While it is locked nothing can destroy it: the web page, a bulk destroy (which skips it and names it), the HTTP API (`409 instance_protected`, also for a batch or a retried destroy) and `fleet instance:destroy` (it reports the instance as refused and exits with 2) all refuse. There is no command-line or API way to unlock: the only way back is **Remove protection** on the instance page, which asks for the password again. Redeploy, start and stop still work. The API shows the state as the read-only `protected` field. Who protects which instance is the administrators' decision; nothing is protected by default.
+
 ## Isolation between instances (optional)
 
 By default the instances of a host can reach each other's containers. To close that, record what actually talks to what first:

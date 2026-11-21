@@ -50,6 +50,27 @@ final class SnapshotJobTest extends JobTestCase
         return new JobLog($this->paths->jobLog('1', 'blog--i1'), new NoLogMasker(), $this->feed, $job);
     }
 
+    private ?string $envSeen = null;
+
+    /** The effect of the credentials fallback: records the env file the script would source, writes the dump. */
+    private function dumpsA(string $dir): \Closure
+    {
+        return function (array $argv) use ($dir): void {
+            self::assertSame(1, preg_match('/> (\.fleet-snapshot-\w+\.sql\.gz)$/', $argv[2], $m));
+            self::assertSame(1, preg_match('/^\. \.\/(\.fleet-snapshot-\w+\.env);/', $argv[2], $e));
+            self::assertSame('0600', substr(\sprintf('%o', fileperms($dir.'/'.($e[1] ?? ''))), -4));
+            $this->envSeen = (string) file_get_contents($dir.'/'.($e[1] ?? ''));
+            file_put_contents($dir.'/'.($m[1] ?? ''), (string) gzencode('-- sql'));
+        };
+    }
+
+    private function describes(string $type, string $user, string $password, string $name = 'app', string $port = ''): CommandResult
+    {
+        return new CommandResult(0, (string) json_encode(['raw' => ['dbinfo' => [
+            'database_type' => $type, 'host' => 'db', 'dbname' => $name, 'username' => $user, 'password' => $password, 'dbPort' => $port,
+        ]]]));
+    }
+
     private function exportsA(string $content): \Closure
     {
         return static function (array $argv) use ($content): void {
@@ -130,6 +151,7 @@ final class SnapshotJobTest extends JobTestCase
     {
         $job = $this->running();
         $this->runner->expect(['ddev', 'export-db'], new CommandResult(2, '', "Failed to export: db container is not running\n"), $this->exportsA('partial'));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(2, '', "db unreachable\n"));
 
         try {
             $this->job()->execute($job, $this->log($job));
@@ -141,6 +163,26 @@ final class SnapshotJobTest extends JobTestCase
         self::assertSame([], glob($this->assets.'/dumps/*') ?: []);
         self::assertSame([], glob($this->assets.'/dumps/.fleet-upload-*') ?: []);
         self::assertStringContainsString('db container is not running', (string) file_get_contents($this->paths->jobLog('1', 'blog--i1')));
+    }
+
+    public function testAFailedExportFallsBackToTheDdevDatabaseCredentials(): void
+    {
+        $job = $this->running();
+        $dir = $this->paths->instanceDir('blog--i1');
+        $this->runner->expect(['ddev', 'export-db'], new CommandResult(1, '', "access denied\n"));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(0), $this->dumpsA($dir));
+
+        $this->job()->execute($job, $this->log($job));
+
+        $exec = $this->runner->callsMatching(['ddev', 'exec']);
+        self::assertCount(1, $exec);
+        self::assertStringContainsString('-udb', $exec[0]->argv[2]);
+        self::assertStringContainsString('MYSQL_PWD', (string) $this->envSeen);
+        self::assertStringNotContainsString('-pdb', $exec[0]->argv[2]);
+        self::assertSame([], glob($dir.'/.fleet-snapshot-*') ?: []);
+        self::assertSame($dir, $exec[0]->cwd);
+        self::assertSame('-- sql', gzdecode((string) file_get_contents($this->assets.'/dumps/default-blog--i1-20261020T090000Z.sql.gz')));
+        self::assertSame([], glob($dir.'/.fleet-snapshot-*') ?: []);
     }
 
     public function testAnEmptyExportIsAFailure(): void
@@ -184,5 +226,59 @@ final class SnapshotJobTest extends JobTestCase
     {
         self::assertSame('snapshot', $this->job()->name());
         self::assertInstanceOf(SnapshotJob::class, self::getContainer()->get(SnapshotJob::class));
+    }
+
+    public function testNonDefaultCredentialsComeFromTheDdevDescriptionAndStayOutOfTheCommandLine(): void
+    {
+        $job = $this->running();
+        $dir = $this->paths->instanceDir('blog--i1');
+        $this->runner->expect(['ddev', 'export-db'], new CommandResult(1, '', "access denied\n"));
+        $this->runner->expect(['ddev', 'describe'], $this->describes('mariadb', 'drupal', "s3'cret pass", 'drupaldb', '3307'));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(0), $this->dumpsA($dir));
+
+        $this->job()->execute($job, $this->log($job));
+
+        $exec = $this->runner->callsMatching(['ddev', 'exec']);
+        self::assertStringContainsString('-udrupal', $exec[0]->argv[2]);
+        self::assertStringContainsString('-P 3307', $exec[0]->argv[2]);
+        self::assertStringEndsWith('drupaldb | gzip > '.substr($exec[0]->argv[2], (int) strrpos($exec[0]->argv[2], '.fleet-snapshot-')), $exec[0]->argv[2]);
+        self::assertStringNotContainsString('cret', $exec[0]->argv[2]);
+        self::assertSame("export MYSQL_PWD='s3'\\''cret pass'\n", $this->envSeen);
+        self::assertStringNotContainsString('cret', (string) file_get_contents($this->paths->jobLog('1', 'blog--i1')));
+        self::assertSame([], glob($dir.'/.fleet-snapshot-*') ?: []);
+    }
+
+    public function testAPostgresInstanceIsDumpedWithPgDump(): void
+    {
+        $job = $this->running();
+        $dir = $this->paths->instanceDir('blog--i1');
+        $this->runner->expect(['ddev', 'export-db'], new CommandResult(1, '', "pg_dump: error\n"));
+        $this->runner->expect(['ddev', 'describe'], $this->describes('postgres', 'pguser', 'pgpass', 'pgdb', '5432'));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(0), $this->dumpsA($dir));
+
+        $this->job()->execute($job, $this->log($job));
+
+        $script = $this->runner->callsMatching(['ddev', 'exec'])[0]->argv[2];
+        self::assertStringContainsString('pg_dump -h db -p 5432 -U pguser --no-owner pgdb', $script);
+        self::assertStringNotContainsString('mariadb-dump', $script);
+        self::assertStringNotContainsString('pgpass', $script);
+        self::assertSame("export PGPASSWORD='pgpass'\n", $this->envSeen);
+        self::assertSame('-- sql', gzdecode((string) file_get_contents($this->assets.'/dumps/default-blog--i1-20261020T090000Z.sql.gz')));
+    }
+
+    public function testAnUnusableDescriptionFallsBackToTheDefaultAccount(): void
+    {
+        $job = $this->running();
+        $dir = $this->paths->instanceDir('blog--i1');
+        $this->runner->expect(['ddev', 'export-db'], new CommandResult(1));
+        $this->runner->expect(['ddev', 'describe'], $this->describes('mariadb', 'bad user; rm -rf /', 'x'));
+        $this->runner->expect(['ddev', 'exec'], new CommandResult(0), $this->dumpsA($dir));
+
+        $this->job()->execute($job, $this->log($job));
+
+        $script = $this->runner->callsMatching(['ddev', 'exec'])[0]->argv[2];
+        self::assertStringContainsString('-udb ', $script);
+        self::assertStringNotContainsString('rm -rf', $script);
+        self::assertSame("export MYSQL_PWD='db'\n", $this->envSeen);
     }
 }

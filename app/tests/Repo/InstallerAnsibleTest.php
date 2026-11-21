@@ -32,7 +32,7 @@ final class InstallerAnsibleTest extends TestCase
         $site = (string) file_get_contents(\dirname(__DIR__, 3).'/install/ansible/site.yml');
         preg_match_all('/^    - role: (\w+)$/m', $site, $m);
 
-        self::assertSame(['packages', 'docker', 'fleet_user', 'shell', 'ddev', 'caddy', 'authelia', 'php_app', 'app_code', 'privileged', 'units', 'hardening'], $m[1]);
+        self::assertSame(['packages', 'docker', 'fleet_user', 'shell', 'host_tmp', 'ddev', 'caddy', 'authelia', 'php_app', 'app_code', 'privileged', 'units', 'hardening'], $m[1]);
     }
 
     public function testHardeningCreatesTheDropInDirectoriesBeforeWritingIntoThem(): void
@@ -47,6 +47,27 @@ final class InstallerAnsibleTest extends TestCase
             self::assertGreaterThan($dirs, $pos, $task.' must run after the directories exist');
         }
         self::assertStringContainsString('path: /etc/systemd/resolved.conf.d', $tasks);
+    }
+
+    public function testHostTmpCapsTheTmpfsOnlyWhenTmpIsOne(): void
+    {
+        // FLE-369: Debian 13's /tmp is a RAM tmpfs of half the RAM; the role caps it and is idempotent.
+        $root = \dirname(__DIR__, 3).'/install/ansible';
+        $tasks = (string) file_get_contents($root.'/roles/host_tmp/tasks/main.yml');
+        $template = (string) file_get_contents($root.'/roles/host_tmp/templates/tmp-size.conf.j2');
+        $vars = (string) file_get_contents($root.'/group_vars/all.yml');
+
+        self::assertStringContainsString('fleet_tmp_size_mb: 4096', $vars);
+        self::assertStringContainsString('findmnt -no TARGET,FSTYPE /tmp', $tasks);
+        self::assertStringContainsString("== ['/tmp', 'tmpfs']", $tasks);
+        self::assertStringContainsString('when: fleet_tmp_size_mb | int > 0', $tasks);
+        self::assertStringContainsString('dest: /etc/systemd/system/tmp.mount.d/00-fleet-size.conf', $tasks);
+        self::assertStringContainsString('Options=mode=1777,strictatime,nosuid,nodev,size={{ fleet_tmp_size_mb }}m,nr_inodes=1m', $template);
+        // A remount only when the size differs and the content fits: a second run changes nothing.
+        self::assertStringContainsString('mount -o remount,size={{ fleet_tmp_size_mb }}m /tmp', $tasks);
+        self::assertStringContainsString('when: host_tmp_remount | bool', $tasks);
+        // The hardening override keeps the cap instead of the vendor size=50%.
+        self::assertStringContainsString("reject('match', '^size=')", (string) file_get_contents($root.'/roles/hardening/tasks/system.yml'));
     }
 
     public function testShellRoleWritesTheHookBlockBetweenItsMarkers(): void

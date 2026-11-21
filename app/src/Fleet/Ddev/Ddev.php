@@ -130,6 +130,21 @@ final readonly class Ddev
     }
 
     /**
+     * The project's database account (`ddev describe -j`): DDEV's own db/db when the project does not override it, and
+     * also when the description cannot be read.
+     */
+    public function databaseInfo(string $dir): DatabaseInfo
+    {
+        try {
+            $result = $this->runner->run(['ddev', 'describe', '-j'], $dir, $this->env, null, self::LIST_TIMEOUT);
+        } catch (\Throwable) {
+            return DatabaseInfo::defaults();
+        }
+
+        return $result->isSuccess() ? (DatabaseInfo::fromDescribe($result->stdout) ?? DatabaseInfo::defaults()) : DatabaseInfo::defaults();
+    }
+
+    /**
      * Memory in MiB per project, summed over its containers (`ddev-<project>-<service>`). An empty array when docker
      * does not answer.
      *

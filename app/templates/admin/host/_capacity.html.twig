@@ -24,6 +24,13 @@
                     <twig:Alert:Description class="text-ink-body">The project allotments add up to more than this host can allocate. That is allowed: projects rarely peak together and the host-wide fence keeps the total at {{ capacity.allocatable_threads }} threads. Lower an allotment if you need a guarantee.</twig:Alert:Description>
                 </twig:Alert>
             {% endif %}
+            {% for warning in capacity.warnings %}
+                <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="capacity-warning-{{ warning.code }}">
+                    <twig:ux:icon name="lucide:triangle-alert" />
+                    <twig:Alert:Title>{{ 'tmp_tmpfs_high' == warning.code ? '/tmp is filling the RAM' : 'Shared memory is high' }}</twig:Alert:Title>
+                    <twig:Alert:Description class="text-ink-body">{{ warning.message }}</twig:Alert:Description>
+                </twig:Alert>
+            {% endfor %}
             {% if capacity.instances.count >= capacity.instances.max %}
                 <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="capacity-instances-full">
                     <twig:ux:icon name="lucide:triangle-alert" />

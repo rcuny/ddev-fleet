@@ -17,6 +17,8 @@ use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Instances\InstanceIsolation;
+use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DomCrawler\Crawler;
@@ -761,5 +763,167 @@ final class InstanceControllerTest extends AdminTestCase
         $this->postWithoutToken('/instances/acme--i1/stop', ['_token' => 'wrong']);
         self::assertResponseStatusCodeSame(403);
         self::assertSame(0, $this->jobCount());
+    }
+
+    public function testProtectionToggleNeedsReauthInBothDirections(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->post('/instances/acme--i1/protection', ['protect' => '1']);
+        self::assertResponseRedirects();
+        self::assertStringContainsString('/admin/reauth', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertStringContainsString('next=/instances/acme--i1', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertFalse($this->protected());
+
+        $this->confirmPassword();
+        $this->post('/instances/acme--i1/protection', ['protect' => '1']);
+        self::assertResponseRedirects('/instances/acme--i1', 303);
+        self::assertTrue($this->protected());
+        $page = $this->open('/instances/acme--i1');
+        self::assertCount(1, $page->filter('[data-testid=protected-badge]'));
+        self::assertStringContainsString('by ', $page->filter('[data-testid=protection-state]')->text());
+        self::assertSame('Remove protection', trim($page->filter('[data-testid=protection-toggle]')->text()));
+
+        // The window was closed: removing the protection asks for the password again.
+        $this->post('/instances/acme--i1/protection', ['protect' => '0']);
+        self::assertStringContainsString('/admin/reauth', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertTrue($this->protected());
+
+        $this->confirmPassword();
+        $this->post('/instances/acme--i1/protection', ['protect' => '0']);
+        self::assertResponseRedirects('/instances/acme--i1', 303);
+        self::assertFalse($this->protected());
+
+        $rows = $this->container()->get(\App\Fleet\Audit\AuditLog::class)->latest(5, \App\Fleet\Audit\AuditLog::INSTANCE_PROTECT);
+        self::assertSame(['acme--i1/off', 'acme--i1/on'], array_map(static fn ($r): string => $r->subject(), $rows));
+    }
+
+    public function testRepeatedProtectionChangesNothing(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->post('/instances/acme--i1/protection', ['protect' => '0']);
+
+        self::assertResponseRedirects('/instances/acme--i1', 303);
+        self::assertStringContainsString('No change', $this->flashes());
+    }
+
+    public function testNonAdminCannotToggleProtection(): void
+    {
+        $this->seed('demo', [InstanceState::Running]);
+        $this->as('member');
+
+        $this->post('/instances/demo--i1/protection', ['protect' => '1']);
+
+        self::assertResponseStatusCodeSame(403);
+        $page = $this->open('/instances/demo--i1');
+        self::assertCount(0, $page->filter('[data-testid=protection-toggle]'));
+    }
+
+    public function testProtectionNeedsACsrfToken(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->confirmPassword();
+
+        $this->post('/instances/acme--i1/protection', ['protect' => '1'], [], 'cross-site');
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertFalse($this->protected());
+    }
+
+    public function testShowPageHasAUsageLimitBadgeOnlyWhenTheAgentPaneShowsTheDialog(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $runner = self::getContainer()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        $panes = "%1\t0\t0\t50\t200\tsidebar\tsh -c fleet:tmux:sidebar\n%2\t52\t0\t70\t200\t\tbash\n%3\t124\t0\t70\t200\t\tbash\n";
+        $runner->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\nacme--i1\n"))
+            ->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, $panes))
+            ->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "limit reached ∙ resets 3pm (Europe/Paris)\nWhat do you want to do?\n1. Stop and wait for limit to reset\n2. Wait here, then continue automatically\n"));
+
+        $page = $this->open('/instances/acme--i1');
+        self::assertCount(1, $page->filter('[data-testid=usage-limit-badge]'));
+        self::assertStringContainsString('Usage limit reached (resets ', $page->filter('[data-testid=usage-limit-badge]')->text());
+
+        $runner->expect(['tmux', '-L', 'fleet', 'list-windows'], new CommandResult(0, "general\nacme--i1\n"))
+            ->expect(['tmux', '-L', 'fleet', 'list-panes'], new CommandResult(0, $panes))
+            ->expect(['tmux', '-L', 'fleet', 'capture-pane'], new CommandResult(0, "❯ \n"));
+        self::assertCount(0, $this->open('/instances/acme--i1')->filter('[data-testid=usage-limit-badge]'));
+    }
+
+    public function testProtectedInstanceShowsABadgeAndNoDestroyButton(): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Running]);
+        $this->lock('acme--i1');
+
+        $list = $this->open('/instances');
+        $locked = $list->filter('[data-instance=acme--i1]');
+        $open = $list->filter('[data-instance=acme--i2]');
+        self::assertCount(1, $locked->filter('[data-testid=protected-badge]'));
+        self::assertStringNotContainsString('Destroy', $locked->html());
+        self::assertStringContainsString('Destroy', $open->html());
+
+        $page = $this->open('/instances/acme--i1');
+        self::assertCount(1, $page->filter('[data-testid=protected-badge]'));
+        self::assertStringNotContainsString('Destroy', $page->filter('[data-testid=instance-actions]')->html());
+    }
+
+    public function testDestroyOfAProtectedInstanceIsRefusedWithAFlash(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->lock('acme--i1');
+
+        $this->post('/instances/acme--i1/destroy', []);
+
+        self::assertResponseRedirects('/instances/acme--i1', 303);
+        self::assertStringContainsString('is protected', $this->flashes());
+        self::assertSame(0, $this->jobCount());
+    }
+
+    public function testBulkDestroySkipsProtectedInstancesAndNamesThem(): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Running, InstanceState::Running]);
+        $this->lock('acme--i2');
+
+        $this->post('/instances/bulk', ['action' => 'destroy', 'ids' => ['acme--i1', 'acme--i2', 'acme--i3']]);
+
+        self::assertResponseRedirects('/instances', 303);
+        $flash = $this->flashes();
+        self::assertStringContainsString('Skipped, protected against destroy: acme--i2', $flash);
+        self::assertStringContainsString('2 jobs queued', $flash);
+        $queued = $this->jobCount();
+        self::assertSame(2, $queued);
+
+        $this->post('/instances/bulk', ['action' => 'destroy', 'ids' => ['acme--i2']]);
+        self::assertResponseRedirects('/instances', 303);
+        self::assertSame($queued, $this->jobCount(), 'a selection of protected instances only queues nothing');
+    }
+
+    public function testWebRetryOfADestroyIsRefusedWhileProtected(): void
+    {
+        $this->seed('acme', [InstanceState::Failed]);
+        $job = $this->jobOn('acme--i1', 'destroy', JobStatus::Failed);
+        $this->lock('acme--i1');
+
+        $this->post('/jobs/'.$job->id().'/retry', []);
+
+        self::assertResponseRedirects('/jobs/'.$job->id(), 303);
+        self::assertStringContainsString('is protected', $this->flashes());
+        self::assertSame(1, $this->jobCount());
+    }
+
+    private function lock(string $id): void
+    {
+        $em = $this->em();
+        new InstanceRepository($em)->find($id)?->protect('admin');
+        $em->flush();
+    }
+
+    private function protected(string $id = 'acme--i1'): bool
+    {
+        $em = $this->em();
+        $em->clear();
+
+        return new InstanceRepository($em)->find($id)?->isProtected() ?? false;
     }
 }

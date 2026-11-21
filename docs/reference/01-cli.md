@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (111), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (112), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -196,7 +196,7 @@ fleet project:show [--format FORMAT] [--json] [--] <name>
 Change a project (only the options you give).
 
 ```
-fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--typesense-dashboard|--no-typesense-dashboard] [--container-ssh|--no-container-ssh] [--unset UNSET] [--allow-privileged-overrides] [--no-allow-privileged-overrides] [--format FORMAT] [--json] [--] <name>
+fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--ci-retention-days CI-RETENTION-DAYS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--typesense-dashboard|--no-typesense-dashboard] [--container-ssh|--no-container-ssh] [--unset UNSET] [--allow-privileged-overrides] [--no-allow-privileged-overrides] [--format FORMAT] [--json] [--] <name>
 ```
 
 | Argument | Required | Description |
@@ -216,8 +216,9 @@ fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname H
 | `--display-submodule-branch=VALUE` |  | Submodule path whose branch is shown next to the instance |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the project may use together: a number, or none for unlimited |  |
 | `--slots=VALUE` |  | Concurrent heavy runs across the project's templates: a number, or none for unlimited |  |
+| `--ci-retention-days=VALUE` |  | Destroy the project's `ci-` instances whose last deploy is older than this many days (daily; never a protected or busy one, nor main): a number, or none to turn it off |  |
 | `--default-template=VALUE` |  | Template deployed when none is given (one of the project's templates) |  |
-| `--typesense / --no-typesense` |  | Give the project a Typesense search service (--no-typesense removes it) |  |
+| `--typesense / --no-typesense` |  | Give the project a Typesense search service (the flag and the "typesense" named port are one setting: --no-typesense also unassigns the port, --port=typesense turns the flag on) |  |
 | `--typesense-dashboard / --no-typesense-dashboard` |  | Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off) |  |
 | `--container-ssh / --no-container-ssh` |  | Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it) |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: default-branch, default-template, hostnames, ports, issue-id-regexp, display-submodule-branch (repeat for several) |  |
@@ -604,7 +605,7 @@ fleet instance:deploy [--branch BRANCH] [--label LABEL] [--count COUNT] [--paral
 
 ### fleet instance:destroy
 
-Destroy instances: their containers, database and checkout.
+Destroy instances: their containers, database and checkout (a protected instance is refused).
 
 ```
 fleet instance:destroy [--all] [--project PROJECT] [--state STATE] [-y|--yes] [--detach] [--format FORMAT] [--json] [--] [<id>...]
@@ -695,6 +696,21 @@ fleet instance:redeploy [--all] [--project PROJECT] [--state STATE] [--template 
 | `--force` |  | Replace a leftover checkout |  |
 | `--yes` | `-y` | Confirm a selector or several ids |  |
 | `--detach` |  | Only queue the job(s) and return |  |
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet instance:retention
+
+Destroy the old `ci-` instances of the projects that set a CI retention (--dry-run lists them).
+
+```
+fleet instance:retention [--project PROJECT] [--dry-run] [--format FORMAT] [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--project=VALUE` |  | Only this project (default: every project with a retention) |  |
+| `--dry-run` |  | List what would be destroyed and change nothing |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
 | `--json` |  | Same as --format=json |  |
 

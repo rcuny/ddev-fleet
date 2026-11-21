@@ -54,6 +54,7 @@ final class ProjectShowCommand extends Command
                     'privileged overrides' => $project->allowPrivilegedOverrides() ? 'ON (allowed)' : 'off',
                     'cpu threads' => $project->cpuThreads() ?? 'unlimited',
                     'slots' => $project->slots() ?? 'unlimited',
+                    'ci retention' => null === $project->ciRetentionDays() ? 'off' : $project->ciRetentionDays().' days',
                     'templates' => array_map(static fn (Template $template): string => $template->name(), $project->templates()),
                     'created' => $project->createdAt()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s').' UTC',
                     'updated' => $project->updatedAt()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s').' UTC',

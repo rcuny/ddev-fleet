@@ -49,6 +49,7 @@ final readonly class ProjectSnapshot
             'container_ssh' => $project->containerSsh(),
             'cpu_threads' => $project->cpuThreads(),
             'slots' => $project->slots(),
+            'ci_retention_days' => $project->ciRetentionDays(),
             'templates' => array_map(static fn (Template $template): array => [
                 'name' => $template->name(),
                 'drupal_env' => $template->drupalEnv(),

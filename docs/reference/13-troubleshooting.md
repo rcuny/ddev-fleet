@@ -96,6 +96,10 @@ Page-by-page detail: [05-upgrade.md](05-upgrade.md), [06-backup-and-restore.md](
 - **A container cannot reach the host any more:** the port is not on the allow-list. `status` lists `container -> host` flows; add the port under **Settings → Isolation**.
 - **Roll back at once:** `fleet host:isolation:disable`, or as root `nft delete table inet fleet_isolation`.
 
+## Database
+
+- **`ERROR 4151 (HY000): Access denied, this account is locked`** in a project script, CI job or hook: it connects to the database as `root`. Fleet locks `root@%` of every instance. Use `db`/`db` and a `test_<name>` database instead; see [The database `root` account is locked](07-hardening.md#the-database-root-account-is-locked).
+
 ## Still stuck
 
 `fleet <command> --help`, the job log, and:

@@ -41,6 +41,15 @@ final class HostCapacityCommandTest extends KernelTestCase
         parent::tearDown();
     }
 
+    public function testHighShmemShowsAsAWarning(): void
+    {
+        file_put_contents($this->tempHome.'/test-meminfo', "MemTotal:       197132288 kB\nShmem:          80000000 kB\n");
+
+        $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true]));
+        self::assertSame(['shmem_high'], array_column($report['warnings'], 'code'));
+        self::assertStringContainsString('WARNING', $this->cli('fleet:host:capacity')->getDisplay());
+    }
+
     public function testJsonShapeAndResolvedLimits(): void
     {
         $this->cli('fleet:project:update', ['name' => 'ci', '--cpu-threads' => '24', '--slots' => '3']);
@@ -55,6 +64,8 @@ final class HostCapacityCommandTest extends KernelTestCase
         self::assertSame(48, $report['threads']);
         self::assertSame(48, $report['cores'], 'no lscpu in the test runner: cores fall back to threads');
         self::assertSame(192512, $report['ram_mb']);
+        self::assertSame([], $report['warnings'], 'FLE-369: nothing to warn about');
+        self::assertFalse($report['memory']['tmp']['tmpfs']);
         self::assertSame(2, $report['reserve_threads']);
         self::assertSame(46, $report['allocatable_threads']);
         self::assertSame(24 + 46, $report['committed_threads'], 'an unlimited project counts as allocatable');

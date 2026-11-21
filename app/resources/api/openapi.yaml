@@ -319,6 +319,9 @@ paths:
                   truncated: {type: boolean}
                   captured_at: {type: string, format: date-time}
                   text: {type: string}
+                  input: {type: [object, "null"], description: "The agent's input box: its text and whether it is only a prompt suggestion."}
+                  usage_limited: {type: boolean, description: "True when the visible screen shows the agent's usage-limit dialog."}
+                  usage_limit_resets_at: {type: [string, "null"], description: "The reset time (ISO-8601 when it could be parsed, else as printed) or null."}
         default: {$ref: "#/components/responses/Problem"}
     post:
       operationId: writeInstanceTerminal
@@ -343,7 +346,16 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409":
+          description: "Conflict: pane_not_agent (a shell is in the foreground) or usage_limited (the agent shows its usage-limit dialog; nothing was typed; the problem carries usage_limit_resets_at)."
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  type: {type: string}
+                  code: {type: string, enum: [pane_not_agent, usage_limited]}
+                  usage_limit_resets_at: {type: [string, "null"]}
         "422": {$ref: "#/components/responses/ValidationFailed"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "200":
@@ -625,7 +637,7 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
     Conflict:
-      description: The instance is busy with another job (`instance_busy`), or it is protected and cannot be destroyed (`protected_instance`).
+      description: The instance is busy with another job (`instance_busy`), or it is protected and cannot be destroyed (`protected_instance` for a project's main instance, `instance_protected` for an instance an admin locked).
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -670,7 +682,7 @@ components:
         detail: {type: string}
         code:
           type: string
-          description: "Machine-readable: capacity_full, instance_busy, scope_missing, project_not_allowed, rate_limited, protected_instance, stale_if_match, validation_failed, invalid_filter, ..."
+          description: "Machine-readable: capacity_full, instance_busy, scope_missing, project_not_allowed, rate_limited, protected_instance, instance_protected, stale_if_match, validation_failed, invalid_filter, ..."
         request_id: {type: string}
         errors: {type: object, additionalProperties: {type: string}, description: "Only on validation_failed."}
         verdict: {type: object, description: "Only on capacity_full."}
@@ -702,7 +714,7 @@ components:
         finished_at: {type: [string, "null"], format: date-time}
     Instance:
       type: object
-      required: [id, project, label, state, branch, template, head, ram_mib, requested_by, url, created_at, deployed_at, last_observed_at, busy]
+      required: [id, project, label, state, branch, template, head, ram_mib, requested_by, url, created_at, deployed_at, last_observed_at, protected, busy]
       properties:
         id: {type: string}
         project: {type: string}
@@ -717,6 +729,7 @@ components:
         created_at: {type: string, format: date-time}
         deployed_at: {type: [string, "null"], format: date-time}
         last_observed_at: {type: [string, "null"], format: date-time}
+        protected: {type: boolean, description: "True while an admin has locked the instance against destroy. Read-only: there is no API to change it."}
         busy:
           type: [object, "null"]
           required: [job_id]

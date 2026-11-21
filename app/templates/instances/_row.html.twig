@@ -11,6 +11,7 @@
     </twig:Table:Cell>
     <twig:Table:Cell class="block min-w-0 p-0 whitespace-normal md:table-cell md:p-2">
         <a href="{{ path('instance_show', {id: instanceId}) }}" data-turbo-frame="_top" class="block font-medium [overflow-wrap:anywhere] text-ink-display">{{ instanceId }}</a>
+        {% if instance.isProtected %}<twig:Badge variant="secondary" data-testid="protected-badge" class="mt-1"><twig:ux:icon name="lucide:lock" />Protected</twig:Badge>{% endif %}
         <span class="block text-xs text-ink-muted [overflow-wrap:anywhere]">{{ instance.project.name }} · {{ instance.branch }}{% if instance.headSha %} · {{ instance.headSha|slice(0, 7) }}{% endif %}</span>
     </twig:Table:Cell>
     <twig:Table:Cell class="block p-0 whitespace-normal md:table-cell md:p-2">
@@ -18,6 +19,11 @@
     </twig:Table:Cell>
     <twig:Table:Cell class="block p-0 text-ink-muted md:table-cell md:p-2">
         {{ instance.ramMib is not null ? instance.ramMib ~ ' MiB' : '' }}
+    </twig:Table:Cell>
+    <twig:Table:Cell class="block p-0 text-xs text-ink-muted md:table-cell md:p-2" data-testid="instance-age">
+        {%- set ageDays = (('now'|date('U')) - instance.createdAt.timestamp) // 86400 -%}
+        <span class="block" data-testid="instance-created">Created {{ instance.createdAt|date('Y-m-d H:i') }} UTC ({{ ageDays }} d)</span>
+        <span class="block" data-testid="instance-deployed">{{ instance.deployedAt ? 'Deployed ' ~ instance.deployedAt|date('Y-m-d H:i') ~ ' UTC' : 'Not deployed yet' }}</span>
     </twig:Table:Cell>
     <twig:Table:Cell class="block p-0 md:table-cell md:p-2 md:text-end">
         <div class="flex flex-wrap items-center gap-2 md:justify-end">
@@ -32,7 +38,7 @@
             {% else %}
                 <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: instanceId, action: 'start'}) }}" formmethod="post" data-turbo-frame="_top">Start</twig:Button>
             {% endif %}
-            {% if canDestroy %}
+            {% if canDestroy and not instance.isProtected %}
                 <twig:Dialog id="destroy-{{ instanceId }}" class="inline-block">
                     <twig:DropdownMenu id="row-{{ instanceId }}" align="end">
                         <twig:DropdownMenu:Trigger>

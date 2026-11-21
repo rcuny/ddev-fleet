@@ -30,6 +30,8 @@ use Psr\Clock\ClockInterface;
  * template pool reads its own slice; the `_project` pool reads the project slice minus its template slices (a cgroup
  * slice includes its children). `unreadable_locks` (additive) counts lock files/directories that could not be read.
  *
+ * `memory` and `warnings` (additive, FLE-369): Shmem and the /tmp tmpfs (TmpfsProbe); `warnings` is a list of {code, message}, empty when all is well.
+ *
  * `instances.not_under_slice` (additive) lists the instances without the cgroup override (SliceMembership).
  *
  * `used_cores` is null = unknown: no sample yet, a sample older than UsageSampler::STALE_SECONDS (the status watcher is
@@ -51,6 +53,7 @@ final readonly class HostCapacity
         private UsageSampler $sampler,
         private DockerNetworkProbe $networks,
         private SlotLocks $locks,
+        private TmpfsProbe $tmpfs,
         private ClockInterface $clock,
         private ?SliceMembership $membership = null,
     ) {
@@ -114,6 +117,7 @@ final readonly class HostCapacity
 
         // Every instance holds one Docker bridge network. Room for instances = the free networks plus the ones the
         // instances already hold; the cap is the smaller of that and the configured one (FLE-219).
+        $memory = $this->tmpfs->read($hardware->ramMb);
         $count = \count($this->instances->ids());
         $docker = $this->networks->read();
         $instanceMax = null === $docker ? $maxInstances : min($maxInstances, max(0, $docker['max'] - $docker['used']) + $count);
@@ -131,6 +135,8 @@ final readonly class HostCapacity
             'instances' => ['count' => $count, 'max' => $instanceMax, 'not_under_slice' => $this->membership?->outside() ?? []],
             'docker_networks' => $docker,
             'projects' => $projects,
+            'memory' => $memory,
+            'warnings' => $memory['warnings'],
         ];
     }
 }

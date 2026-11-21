@@ -74,6 +74,18 @@ The host's own answers, mode `0644` (no secret in it), rewritten on every run fr
 | `fleet_hardening_trusted_ips` | `--trusted-ip` | List of addresses or CIDRs. |
 | `fleet_hardening_firewall_grace_minutes` | `--firewall-grace` | 2 to 120, default 10. |
 | `fleet_hardening_tmp` | `--harden-tmp` | `true` mounts `/tmp` `nosuid,nodev,noexec` at the next boot. |
+| `fleet_tmp_size_mb` | none (set it in `host-vars.yml`) | Size cap of the `/tmp` tmpfs in MB, default `4096`; `0` leaves `/tmp` alone. See below. |
+
+### `/tmp` is RAM
+
+Debian 13 mounts `/tmp` as a tmpfs sized at half of the RAM, so a file copied there takes memory, not disk. On
+2026-11-20 about 28 GB of SQL dumps in `/tmp` filled a host and made it unreachable. Every install and upgrade runs the
+`host_tmp` role: when `/tmp` is a tmpfs of its own it writes `/etc/systemd/system/tmp.mount.d/00-fleet-size.conf`
+(`size=<fleet_tmp_size_mb>m`, the other Debian options kept), and resizes the running mount with
+`mount -o remount,size=...` when the content fits (otherwise the cap applies at the next boot, and the run says so).
+A host with `/tmp` on disk is left alone. Keep large files in `/var/tmp` or `/srv`. To undo, delete the drop-in and reboot.
+`--harden-tmp` keeps the cap. `fleet host:capacity` and the host page warn when `/tmp` is more than 50% full or shared
+memory is above 25% of the RAM (`docs/reference/10-capacity.md`).
 
 An explicit `--harden` refuses a lock-out (`fleet_hardening_strict=true`); a stored re-run, such as an upgrade, only warns.
 
