@@ -75,7 +75,7 @@ class WebhookDelivery
     #[ORM\Column(type: Types::STRING, length: 16, nullable: true)]
     private ?string $action;
 
-    /** The recorded decision, e.g. "would deploy fle-66 (template jira-work)". */
+    /** The recorded decision, e.g. "would deploy fle-66 (template jira-dev)". */
     #[ORM\Column(type: Types::STRING, length: 300, nullable: true)]
     private ?string $decision;
 

@@ -15,5 +15,6 @@ Task-oriented pages, in the order you will most likely need them: install Fleet,
 | [use-the-api.md](09-use-the-api.md) | Create an API token and call Fleet from scripts and CI |
 | [git-access-and-ssh-keys.md](10-git-access-and-ssh-keys.md) | Understand which key reads, which pushes, and what an instance can do with your code |
 | [try-on-digitalocean.md](11-try-on-digitalocean.md) | Try Fleet on a throw-away DigitalOcean Droplet with one pasted file, no domain needed |
+| [run-agents-on-fleet.md](12-run-agents-on-fleet.md) | Know what is true inside an instance for agents: the marker, no `claude -p`, session types, cost |
 
 Looking up a flag, a field or a path instead? Go to the [reference](../reference/README.md). New to the vocabulary? Read [concepts](../concepts.md) first.
