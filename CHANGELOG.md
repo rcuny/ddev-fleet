@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-11-21
+
+### Added
+- **FLE-363: protect an instance against destroy.** An administrator can lock an instance on its page (**Protection** section, password re-auth asked to lock and to unlock). While it is locked, the web page, a bulk destroy (which skips it and names it), the API (`409 instance_protected` on a single destroy, a batch item and a retried destroy) and `fleet instance:destroy` (exit 2 for the protected instance) all refuse, and a destroy job queued before the lock fails without removing anything. Protected instances show a lock badge and no Destroy button, the instance JSON gains a read-only `protected` field, `fleet instance:list` shows it, and every change is audited as `instance.protect` (`<id>/on|off`). Redeploy, start and stop are not affected.
+
+
+- **FLE-367: instance age and optional CI retention.** The web instance list gets an **Age** column (created and last deploy) and `fleet instance:list` gains `createdAt` (the API instance JSON and its OpenAPI schema already had `created_at` and `deployed_at`). A project can set `ci_retention_days` (Capacity tab, or `fleet project:update --ci-retention-days=N|none`): a daily pass then destroys its instances whose label starts with `ci-` and whose last deploy is older than N days, never a protected, busy or `main` instance. Each destroy is audited as `instance.retention`. `fleet instance:retention [--project=P] [--dry-run]` runs or previews the pass.
+
+
+- **FLE-368:** The terminal read reports `usage_limited` and `usage_limit_resets_at` when the agent pane shows Claude Code's usage-limit dialog, and the instance page shows a "Usage limit reached" badge with the reset time.
+
+
+- Hosts: the installer caps the `/tmp` tmpfs (Debian 13 sizes it at half of the RAM; default 4096 MB, `fleet_tmp_size_mb`), and `fleet:host:capacity` and the host Capacity tab warn when `/tmp` is more than 50% full or shared memory is above 25% of the RAM (FLE-369).
+
+### Changed
+- **FLE-321: Typesense flag, named port and keys are documented and pinned by tests.** `--no-typesense` unassigns the `typesense` named port and `--port=typesense` turns the flag back on (one setting, now said in the option help and in the networking reference). The reference also states that `.ddev/.env` and `web_environment` carry the same per-instance derived admin key, not the project secret, and that a deploy of a project with the flag off writes neither.
+
+- **FLE-349: documentation for the locked database `root` account (FLE-324).** Client projects that connect to an instance's database as `root` over the network (extra test or kernel databases, `GRANT`, `import-db --database=<other>`, custom `mysql -uroot`) fail with `ERROR 4151: Access denied, this account is locked`. The hardening reference now says what to use instead (`db`/`db`, `test_%` databases, `docker exec ... mysql -uroot` through the socket), gives the grep to find callers, and the troubleshooting page lists the error. Audit result: Fleet's own code and the shipped templates have no network `root` caller.
+- **FLE-360: the project importer's refresh step drops a dead variable, and its tests now prove the Caddy refresh**
+  An import that turns a template's Mailpit option on rewrites the site of a deployed instance, a failed `caddy validate`
+  comes back as a warning with the data saved, and a rolled-back import refreshes nothing.
+
+- Typing into an agent pane that shows the usage-limit dialog over the terminal API is refused with `409 usage_limited` (with the reset time) instead of answering the dialog. Fleet does not answer the dialog itself.
+
+### Fixed
+- **FLE-295: `asset:snapshot` reads the instance's database account and handles Postgres.** When `ddev export-db` fails, the fallback takes the user, database, host and port from `ddev describe` instead of assuming db/db, dumps Postgres instances with `pg_dump`, and hands the password to the dump client through `MYSQL_PWD` / `PGPASSWORD` (a 0600 file removed right after use), never through the command line or the job log.
+
+- `asset:snapshot` falls back to the DDEV database credentials (db/db) when `ddev export-db` fails for lack of credentials (FLE-355, FLE-295).
+
+- **FLE-359:** Nudging an agent over the terminal API: Enter is sent as its own keystroke after a short pause, the input box is read back and Enter is sent once more when the text stayed in it; the answer reports `submit`.
+- The terminal read has an `input` field that tells Claude Code's greyed prompt suggestion from text that was typed.
+
+- **FLE-364:** `fleet instance:destroy --json` now lists the refused (protected) instances in a `refused` array (`id`, `reason`), also when every selected instance was refused.
+- The destroy job's failure message for a protected instance says to remove the protection on the instance page before retrying, and the bulk destroy shows one flash that names the queued jobs and the skipped protected instances together.
+
+### Dependencies
+- doctrine/doctrine-bundle ^3.3.4 -> ^3.4.2, doctrine/orm ^3.7.6 -> ^3.8.0 (#303).
+- phpunit/phpunit ^13.4.7 then ^13.4.8 (#316, #320).
+- phpstan/phpstan ^2.3.5 -> ^2.3.7 (#314).
+- Terraform provider digitalocean/digitalocean ~> 2.107 -> ~> 2.108, throwaway test hosts only (#319).
+
+#### Rollout
+- A database migration adds `instance.protected`, `protected_at` and `protected_by`; `fleet upgrade` runs it. No instance is protected after the upgrade.
+- Off by default: no project has a retention after the upgrade, so nothing is destroyed until an administrator sets one.
+- A database migration adds `project.ci_retention_days`; `fleet upgrade` runs it. A `fleet project export`/import keeps the host's value.
+- FLE-369: on a host where `/tmp` is a tmpfs (Debian 13 default, half the RAM), the installer caps it at 4 GB (`fleet_tmp_size_mb`, `0` opts out). If `/tmp` holds less than 4 GB, it is resized in place and no file is removed. Otherwise the cap only applies at the next boot. Keep large files (DB dumps) on disk, for example `/var/tmp` or `/srv`.
+
 ## [1.13.3] - 2026-11-17
 
 ### Fixed
@@ -1662,7 +1709,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.13.3...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/rcuny/ddev-fleet/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/rcuny/ddev-fleet/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/rcuny/ddev-fleet/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/rcuny/ddev-fleet/compare/v1.13.0...v1.13.1

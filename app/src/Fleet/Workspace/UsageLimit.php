@@ -54,7 +54,8 @@ final readonly class UsageLimit
         }
         try {
             $local = $now->setTimezone($zone ?? $now->getTimezone());
-            $at = new \DateTimeImmutable($clock, $local->getTimezone());
+            // Relative to $now's date, not the real today (a bare "3pm" given to the constructor means today).
+            $at = $local->modify($clock);
         } catch (\Exception) {
             return $raw;
         }
