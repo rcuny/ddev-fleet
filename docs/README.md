@@ -11,7 +11,7 @@ Find the shortest path to what you want to do. Pick a journey below, or scan the
 [Install](guides/01-install.md) -> [Operate](guides/07-operate.md) -> [Secure the host](guides/08-secure-the-host.md) -> reference: [upgrade](reference/05-upgrade.md), [backup and restore](reference/06-backup-and-restore.md), [hardening](reference/07-hardening.md), [troubleshooting](reference/13-troubleshooting.md)
 
 **I want to automate what suits my workflow**
-[Automate deploys](guides/03-automate-deploys.md) -> [Run CI](guides/04-run-ci.md) -> [The tmux workspace and agents](guides/05-work-with-agents.md) -> reference: [webhooks and schedules](reference/11-webhooks-and-schedules.md)
+[Automate deploys](guides/03-automate-deploys.md) -> [Run CI](guides/04-run-ci.md) -> [The tmux workspace and agents](guides/05-work-with-agents.md) -> [Run agents on Fleet](guides/12-run-agents-on-fleet.md) -> reference: [webhooks and schedules](reference/11-webhooks-and-schedules.md)
 
 **I share sites with others**
 [Share and access](guides/06-share-and-access.md)
@@ -34,6 +34,7 @@ Find the shortest path to what you want to do. Pick a journey below, or scan the
 - [Use the API](guides/09-use-the-api.md): create a token, call the HTTP API.
 - [Git access and SSH keys](guides/10-git-access-and-ssh-keys.md): which key reads, which pushes, what an instance can do.
 - [Try Fleet on DigitalOcean](guides/11-try-on-digitalocean.md): a throw-away Droplet from one pasted cloud-init file, no domain needed.
+- [Run agents on Fleet](guides/12-run-agents-on-fleet.md): the `FLEET_INSTANCE_HOST` marker, no `claude -p`, session types, cost, where to run what.
 
 **Reference** ([index](reference/README.md))
 - [CLI](reference/01-cli.md): every command.
