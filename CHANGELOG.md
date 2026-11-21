@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-11-21
+
+### Added
+- **FLE-371: guide "Run agents on Fleet"** (`docs/guides/12-run-agents-on-fleet.md`): `FLEET_INSTANCE_HOST` as the documented "I run on Fleet" marker (and `FLEET_AGENT=1` only for agent templates), that `claude -p` is not available in an instance, the four session types with their template names, the cost model and where to run what.
+- A test (`AgentDocsTest`) pins `FLEET_INSTANCE_HOST` in the instance configuration writer and in the docs.
+
+### Changed
+- The docs and the webhook decision example use `jira-dev` as the dev template name instead of `jira-work`. No behaviour change.
+
 ## [1.14.0] - 2026-11-21
 
 ### Added
@@ -1709,7 +1718,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/rcuny/ddev-fleet/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/rcuny/ddev-fleet/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/rcuny/ddev-fleet/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/rcuny/ddev-fleet/compare/v1.13.1...v1.13.2
