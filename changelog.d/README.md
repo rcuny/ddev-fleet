@@ -9,6 +9,10 @@ One file per change, so two branches never edit the same lines of `CHANGELOG.md`
 - Do not edit the `## [Unreleased]` section of `CHANGELOG.md`; the release step builds it from these files:
   `php ci/changelog-assemble.php` previews the result, `php ci/changelog-assemble.php X.Y.Z` cuts the release
   (see `docs/contributing/04-releasing.md`).
+- **Renovate PRs need no fragment.** At release time `ci/changelog-assemble.php` (through `ci/changelog-renovate.php`)
+  reads git only: the first-parent merges of Renovate PRs since the previous `v1.*` tag become one condensed
+  `- Renovate: <family> (#N, #M)` bullet per package family under `### Dependencies`, in the preview too. A PR
+  already cited as `#N` in a fragment or in `[Unreleased]` is not repeated. Do not write `renovate-YYYY-MM-DD.md` by hand.
 - Fragments, like every product Markdown file, carry no front matter.
 
 ## Rollout notes (operator actions)

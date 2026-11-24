@@ -24,6 +24,8 @@ Bitbucket is the source of truth; GitHub (`rcuny/ddev-fleet`) is a read-only mir
 
 Every feature or fix branch adds `changelog.d/<KEY>.md` (format: `changelog.d/README.md`), never a line in `CHANGELOG.md`. It starts with a `### <Section>` heading. Preview with `php ci/changelog-assemble.php`; cut with `php ci/changelog-assemble.php X.Y.Z`, which writes the version section and deletes the fragments.
 
+Renovate PRs need no fragment: the assemble step lists the Renovate PRs merged into `develop` since the previous `v1.*` tag (from git, no API) as one `- Renovate: <family> (#N)` bullet each under `### Dependencies`, in the preview too. A PR already cited as `#N` in a fragment is not repeated.
+
 ### Rollout notes and ACTION lines
 
 A change that needs operator attention ends its fragment with a `## Rollout` section of bullets only. A bullet starting `ACTION:` becomes a warning in `fleet upgrade --check` and in the upgrade prompt, so say what to do, where and when (before or after). Schema changes need no note.

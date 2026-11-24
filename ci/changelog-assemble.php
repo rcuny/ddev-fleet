@@ -15,8 +15,12 @@ declare(strict_types=1);
  * CHANGELOG.md comes first. Sections are merged and written in the order of SECTIONS, unknown ones after them.
  * A fragment may end with a "## Rollout" heading and bullets for the operator (a bullet starting "ACTION:" needs
  * operator action); they are merged into one "#### Rollout" subsection at the end of the version (changelog.d/README.md).
+ * The Renovate PRs merged since the previous v1.* tag are added to "### Dependencies" from git (ci/changelog-renovate.php);
+ * a PR already cited as "#N" in a fragment or in [Unreleased] is not repeated.
  * Exit codes: 0 done, 1 a fragment or the changelog is malformed.
  */
+require_once __DIR__.'/changelog-renovate.php';
+
 const SECTIONS = ['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security', 'Dependencies'];
 
 /**
@@ -124,6 +128,10 @@ function assembledBody(string $root): string
             throw new RuntimeException(basename($file).': '.$e->getMessage(), 0, $e);
         }
         $texts[] = $text;
+    }
+    $renovate = renovateDependenciesSection($root, $texts);
+    if ('' !== $renovate) {
+        $texts[] = $renovate;
     }
 
     return mergeSections($texts);
