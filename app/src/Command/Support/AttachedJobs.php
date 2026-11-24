@@ -60,12 +60,13 @@ final class AttachedJobs
      * the outcome. Table mode echoes the logs and prints `N succeeded, M failed`; JSON mode prints one document.
      *
      * @param list<Job>                     $jobs
-     * @param (\Closure(Job): ?string)|null $url   the site URL of a succeeded job, printed after the summary
-     * @param array<string, mixed>          $extra additional keys of the JSON document (table mode ignores them)
+     * @param (\Closure(Job): ?string)|null $url     the site URL of a succeeded job, printed after the summary
+     * @param array<string, mixed>          $extra   additional keys of the JSON document (table mode ignores them)
+     * @param int                           $skipped the `--all` instances left out because they are failed (FLE-375), counted in the summary
      *
      * @return int the exit code: 0, or 1 / 2 as exitCode() says
      */
-    public function handle(array $jobs, bool $detach, JsonOutput $out, OutputInterface $output, ?\Closure $url = null, array $extra = []): int
+    public function handle(array $jobs, bool $detach, JsonOutput $out, OutputInterface $output, ?\Closure $url = null, array $extra = [], int $skipped = 0): int
     {
         if ($detach) {
             $out->emit(['jobs' => array_map(self::row(...), $jobs)] + $extra, static function (JsonOutput $out) use ($jobs): void {
@@ -87,8 +88,8 @@ final class AttachedJobs
         }
         $out->emit(
             ['jobs' => array_map(static fn (Job $job): array => self::row($job) + (isset($urls[(int) $job->id()]) ? ['url' => $urls[(int) $job->id()]] : []), $jobs)] + $count + $extra,
-            static function (JsonOutput $out) use ($count, $urls): void {
-                $out->success(\sprintf('%d succeeded, %d failed', $count['succeeded'], $count['failed']));
+            static function (JsonOutput $out) use ($count, $urls, $skipped): void {
+                $out->success(\sprintf('%d succeeded, %d failed', $count['succeeded'], $count['failed']).($skipped > 0 ? \sprintf(', %d skipped (failed)', $skipped) : ''));
                 foreach ($urls as $site) {
                     $out->success($site);
                 }

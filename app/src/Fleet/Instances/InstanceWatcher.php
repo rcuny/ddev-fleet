@@ -7,6 +7,7 @@ namespace App\Fleet\Instances;
 use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\Ddev\DdevProject;
 use App\Fleet\Ddev\DdevUnavailable;
@@ -23,6 +24,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * Keeps the instance rows true to the host. One tick does what is due: `ddev list` every 10 s (running or stopped),
  * `docker stats` every 30 s (memory), the job reaper every tick and the retention prune once a day. It only moves
  * instances that are running, stopped or unknown: deploying, destroying and failed belong to a job or to a person.
+ * The one exception (FLE-375): a failed instance whose containers are all running and, where they have a HEALTHCHECK,
+ * healthy, with no job queued or running for it, goes back to running (audit entry `instance.healed`).
  * Every InstanceSshAgent::REFRESH_SECONDS it also revives and re-keys the ssh-agents of opted-in instances (FLE-167).
  * Every USAGE_SECONDS it samples the CPU use of the capacity slices from cgroup `cpu.stat` (FLE-200).
  * When ddev does not answer, those instances become `unknown`, never `stopped`.
@@ -68,6 +71,8 @@ final class InstanceWatcher
         private readonly ?\App\Api\Token\ApiTokenReminder $reminder = null,
         private readonly ?InstanceDbIsolationWriter $isolation = null,
         private readonly ?\App\Fleet\Isolation\IsolationConverger $network = null,
+        private readonly ?\App\Domain\Job\JobRepository $jobs = null,
+        private readonly ?AuditLog $audit = null,
     ) {
     }
 
@@ -232,7 +237,14 @@ final class InstanceWatcher
 
         $touched = [];
         $changed = [];
-        foreach ($this->instances->all() as $instance) {
+        $all = $this->instances->all();
+        foreach ($this->healable($all, $projects) as $instance) {
+            $instance->observe(InstanceState::Running, $this->ram[$instance->id()] ?? $instance->ramMib(), $now);
+            $changed[] = $instance; // saved by the pass below, which also takes ddev's own word
+            $this->audit?->record('system', AuditLog::INSTANCE_HEALED, $instance->id().': failed -> running, all containers up and healthy');
+            $this->logger->warning($instance->id().': was failed, all containers are up and healthy: now running.');
+        }
+        foreach ($all as $instance) {
             if (!\in_array($instance->state(), [InstanceState::Running, InstanceState::Stopped, InstanceState::Unknown], true)) {
                 continue;
             }
@@ -255,6 +267,50 @@ final class InstanceWatcher
         }
 
         return \count($changed);
+    }
+
+    /**
+     * FLE-375: the failed instances that can safely go back to running. Needs ddev to list the project as running, no queued or
+     * running job, at least one container including `web`, every container running and none unhealthy or still starting.
+     *
+     * @param list<Instance>                  $all
+     * @param array<string, DdevProject>|null $projects
+     *
+     * @return list<Instance>
+     */
+    private function healable(array $all, ?array $projects): array
+    {
+        if (null === $projects || null === $this->jobs) {
+            return [];
+        }
+        $failed = array_values(array_filter($all, static fn (Instance $i): bool => InstanceState::Failed === $i->state() && ($projects[$i->id()] ?? null)?->isRunning() === true));
+        if ([] === $failed) {
+            return [];
+        }
+        $busy = $this->jobs->activeInstanceIds(array_map(static fn (Instance $i): string => $i->id(), $failed));
+
+        $healed = [];
+        foreach ($failed as $instance) {
+            if (\in_array($instance->id(), $busy, true)) {
+                continue;
+            }
+            try {
+                $containers = $this->ddev->projectContainerHealth($instance->id());
+            } catch (DdevUnavailable) {
+                continue;
+            }
+            if ([] === $containers || [] === array_filter($containers, static fn (array $c): bool => 'web' === $c['service'])) {
+                continue;
+            }
+            foreach ($containers as $container) {
+                if (!$container['running'] || !\in_array($container['health'], ['none', 'healthy'], true)) {
+                    continue 2;
+                }
+            }
+            $healed[] = $instance;
+        }
+
+        return $healed;
     }
 
     private static function stateOf(?DdevProject $project): InstanceState

@@ -48,6 +48,9 @@ final class InstanceWatcherTest extends InstanceJobTestCase
             null,
             null,
             $withIsolation ? new \App\Fleet\Instances\InstanceDbIsolationWriter($this->ddev) : null,
+            null,
+            $jobs,
+            new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock),
         );
     }
 
@@ -69,6 +72,88 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         $this->em->clear();
 
         return $this->instances->find($instance->id())?->state() ?? self::fail('the instance vanished');
+    }
+
+    /**
+     * @param list<string> $rows `service|state|status` lines of `docker ps -a`
+     */
+    private function psRows(string $id, array $rows): CommandResult
+    {
+        return new CommandResult(0, implode("\n", array_map(static fn (string $r): string => 'ddev-'.$id.'-'.explode('|', $r, 2)[0].'|'.$r, $rows))."\n");
+    }
+
+    /**
+     * @param list<string> $rows
+     */
+    private function healTick(array $rows, string $ddevStatus = 'running', bool $withJob = false): InstanceState
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Failed);
+        if ($withJob) {
+            $this->job('start', $instance);
+        }
+        $id = $instance->id();
+        $this->runner->expect(['ddev', 'list'], $this->ddevList([$id => $ddevStatus]));
+        $this->runner->expect(['docker', 'ps'], $this->psRows($id, $rows));
+
+        $this->watcher()->tick($this->clock->now());
+
+        return $this->stateOf($instance);
+    }
+
+    public function testAFailedInstanceWithAllContainersUpAndHealthyGoesBackToRunning(): void
+    {
+        $state = $this->healTick(['web|running|Up 5 minutes (healthy)', 'db|running|Up 5 minutes (healthy)', 'mailpit|running|Up 5 minutes']);
+
+        self::assertSame(InstanceState::Running, $state);
+        $entries = $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'instance.healed']);
+        self::assertCount(1, $entries);
+    }
+
+    /**
+     * @return iterable<string, array{list<string>}>
+     */
+    public static function unhealthyContainers(): iterable
+    {
+        yield 'one unhealthy' => [['web|running|Up 5 minutes (healthy)', 'db|running|Up 5 minutes (unhealthy)']];
+        yield 'one still starting' => [['web|running|Up 5 seconds (health: starting)', 'db|running|Up 5 minutes (healthy)']];
+        yield 'one exited' => [['web|running|Up 5 minutes (healthy)', 'db|exited|Exited (1) 2 minutes ago']];
+        yield 'one missing (no web)' => [['db|running|Up 5 minutes (healthy)']];
+        yield 'no container' => [[]];
+    }
+
+    /**
+     * @param list<string> $rows
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('unhealthyContainers')]
+    public function testAFailedInstanceStaysFailedWhenAContainerIsNotUpAndHealthy(array $rows): void
+    {
+        self::assertSame(InstanceState::Failed, $this->healTick($rows));
+        self::assertCount(0, $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'instance.healed']));
+    }
+
+    public function testAFailedInstanceWithAJobInProgressIsLeftAlone(): void
+    {
+        self::assertSame(InstanceState::Failed, $this->healTick(['web|running|Up 5 minutes (healthy)', 'db|running|Up 5 minutes (healthy)'], 'running', true));
+    }
+
+    public function testAFailedInstanceThatDdevDoesNotListAsRunningIsLeftAlone(): void
+    {
+        self::assertSame(InstanceState::Failed, $this->healTick(['web|running|Up 5 minutes (healthy)', 'db|running|Up 5 minutes (healthy)'], 'stopped'));
+    }
+
+    public function testDeployingAndDestroyingInstancesAreNeverHealed(): void
+    {
+        $deploying = $this->instance('dep', 'develop', InstanceState::Deploying);
+        $destroying = $this->instance('des', 'develop', InstanceState::Destroying);
+        $up = ['web|running|Up (healthy)', 'db|running|Up (healthy)'];
+        $this->runner->expect(['ddev', 'list'], $this->ddevList([$deploying->id() => 'running', $destroying->id() => 'running']));
+        $this->runner->expect(['docker', 'ps'], $this->psRows($deploying->id(), $up));
+        $this->runner->expect(['docker', 'ps'], $this->psRows($destroying->id(), $up));
+
+        $this->watcher()->tick($this->clock->now());
+
+        self::assertSame(InstanceState::Deploying, $this->stateOf($deploying));
+        self::assertSame(InstanceState::Destroying, $this->stateOf($destroying));
     }
 
     public function testTheWatcherRedisconnectsADbThatWasAttachedAgain(): void
