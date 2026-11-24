@@ -206,6 +206,37 @@
         "php"
       ],
       "enabled": false
+    },
+    {
+      "description": "FLE-373: a vulnerability alert always opens its PR at once, for any composer or npm package, Symfony patches included. This rule sits LAST on purpose: the Symfony patch rule above (enabled false, the patch arrives with the weekly lockFileMaintenance) also matched the alert and suppressed it, so on 2026-11-24 17 Symfony advisories got no PR. It re-enables the update, drops the schedule and groups all alerts in 'security fixes'. It sets no rangeStrategy, so composer keeps the 8.1.* constraint and the PR changes composer.lock only through composer itself (content-hash stays consistent with composer.json, FLE-130). Patch-level security fixes are automerged once fleet-gates is green (the lock moves to a release the advisory says is fixed; waiting a week is the exposure); minor and major security fixes stay manual.",
+      "matchManagers": [
+        "composer",
+        "npm"
+      ],
+      "isVulnerabilityAlert": true,
+      "enabled": true,
+      "schedule": [
+        "at any time"
+      ],
+      "groupName": "security fixes",
+      "prCreation": "immediate",
+      "minimumReleaseAge": null,
+      "automerge": false
+    },
+    {
+      "description": "FLE-373: patch-level security fixes are automerged when fleet-gates is green, Symfony included (the runner automerges at most one PR per run). Minor and major security fixes keep automerge off.",
+      "matchManagers": [
+        "composer",
+        "npm"
+      ],
+      "isVulnerabilityAlert": true,
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "merge-commit",
+      "platformAutomerge": false
     }
   ],
   "lockFileMaintenance": {

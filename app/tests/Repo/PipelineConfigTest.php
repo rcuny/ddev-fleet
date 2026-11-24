@@ -344,6 +344,43 @@ final class PipelineConfigTest extends TestCase
         self::assertMatchesRegularExpression('/^[A-Z][A-Z0-9]+-\d+$/', $config['commitMessagePrefix']);
     }
 
+    public function testRenovateSecurityAlertsOpenAtOnceAfterTheSymfonyPatchRule(): void
+    {
+        $rules = $this->renovate()['packageRules'];
+
+        $patchOff = null;
+        $alerts = [];
+        foreach ($rules as $i => $rule) {
+            if (false === ($rule['enabled'] ?? null) && ['patch'] === ($rule['matchUpdateTypes'] ?? null) && ['symfony/**'] === ($rule['matchPackageNames'] ?? null)) {
+                $patchOff = $i;
+            }
+            if (true === ($rule['isVulnerabilityAlert'] ?? false)) {
+                $alerts[$i] = $rule;
+            }
+        }
+
+        self::assertNotNull($patchOff, 'the Symfony patch-disable rule must still exist');
+        self::assertNotSame([], $alerts);
+        $reenable = null;
+        foreach ($alerts as $i => $rule) {
+            if (true === ($rule['enabled'] ?? null)) {
+                $reenable = [$i, $rule];
+            }
+        }
+        self::assertNotNull($reenable, 'a vulnerability rule must re-enable the update');
+        self::assertGreaterThan($patchOff, $reenable[0], 'it must come after the Symfony patch rule');
+        self::assertContains('composer', $reenable[1]['matchManagers']);
+        self::assertContains('npm', $reenable[1]['matchManagers']);
+        self::assertSame(['at any time'], $reenable[1]['schedule']);
+        self::assertSame('security fixes', $reenable[1]['groupName']);
+        self::assertArrayNotHasKey('rangeStrategy', $reenable[1], 'composer.lock must keep its content-hash (FLE-130)');
+        self::assertStringContainsString('FLE-373', $reenable[1]['description']);
+
+        $automerge = array_values(array_filter($alerts, static fn (array $r): bool => true === ($r['automerge'] ?? false)));
+        self::assertCount(1, $automerge);
+        self::assertSame(['patch'], $automerge[0]['matchUpdateTypes']);
+    }
+
     public function testPlaywrightIsPinnedExactlyInItsOwnPackage(): void
     {
         $package = json_decode((string) file_get_contents(self::root().'/tests/playwright/package.json'), true, 512, \JSON_THROW_ON_ERROR);
