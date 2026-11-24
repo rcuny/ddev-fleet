@@ -287,6 +287,42 @@ final readonly class Ddev
     }
 
     /**
+     * The containers of a DDEV project with their run state and Docker health (`docker ps -a`, FLE-375). `health` is
+     * `healthy`, `unhealthy`, `starting` or `none` (the image has no HEALTHCHECK), read from the status text.
+     *
+     * @return list<array{name: string, service: string, running: bool, health: string}>
+     *
+     * @throws DdevUnavailable when docker does not answer
+     */
+    public function projectContainerHealth(string $project): array
+    {
+        try {
+            $result = $this->runner->run(['docker', 'ps', '-a', '--filter', 'label=com.ddev.site-name='.$project, '--format', '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.State}}|{{.Status}}'], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable $e) {
+            throw new DdevUnavailable('docker ps did not answer.', 0, $e);
+        }
+        if (!$result->isSuccess()) {
+            throw new DdevUnavailable('docker ps failed.');
+        }
+        $rows = [];
+        foreach (preg_split('/\R/', trim($result->stdout)) ?: [] as $line) {
+            $parts = explode('|', $line, 4);
+            if ('' === $parts[0] || 4 !== \count($parts)) {
+                continue;
+            }
+            $health = match (true) {
+                str_contains($parts[3], '(unhealthy)') => 'unhealthy',
+                str_contains($parts[3], '(healthy)') => 'healthy',
+                str_contains($parts[3], '(health: starting)') => 'starting',
+                default => 'none',
+            };
+            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'running' => 'running' === $parts[2], 'health' => $health];
+        }
+
+        return $rows;
+    }
+
+    /**
      * DDEV v1.25 configures the router from the container env (HTTP_EXPOSE / HTTPS_EXPOSE, through its traefik file config), not from docker labels.
      * A container that cannot be inspected counts as not exposed (it is then detached, the safe side).
      */
