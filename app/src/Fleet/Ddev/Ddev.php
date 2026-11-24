@@ -288,7 +288,9 @@ final readonly class Ddev
 
     /**
      * The containers of a DDEV project with their run state and Docker health (`docker ps -a`, FLE-375). `health` is
-     * `healthy`, `unhealthy`, `starting` or `none` (the image has no HEALTHCHECK), read from the status text.
+     * `healthy`, `unhealthy`, `starting`, `none` (the image has no HEALTHCHECK) or `unknown`. FLE-376: health is read from
+     * `docker inspect` (`.State.Health.Status`), not from the `docker ps` status wording; anything unrecognised, or a
+     * container that cannot be inspected, is `unknown` (callers treat it as not healthy).
      *
      * @return list<array{name: string, service: string, running: bool, health: string}>
      *
@@ -297,7 +299,7 @@ final readonly class Ddev
     public function projectContainerHealth(string $project): array
     {
         try {
-            $result = $this->runner->run(['docker', 'ps', '-a', '--filter', 'label=com.ddev.site-name='.$project, '--format', '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.State}}|{{.Status}}'], null, [], null, self::STATS_TIMEOUT);
+            $result = $this->runner->run(['docker', 'ps', '-a', '--filter', 'label=com.ddev.site-name='.$project, '--format', '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.State}}'], null, [], null, self::STATS_TIMEOUT);
         } catch (\Throwable $e) {
             throw new DdevUnavailable('docker ps did not answer.', 0, $e);
         }
@@ -306,20 +308,44 @@ final readonly class Ddev
         }
         $rows = [];
         foreach (preg_split('/\R/', trim($result->stdout)) ?: [] as $line) {
-            $parts = explode('|', $line, 4);
-            if ('' === $parts[0] || 4 !== \count($parts)) {
+            $parts = explode('|', $line, 3);
+            if ('' === $parts[0] || 3 !== \count($parts)) {
                 continue;
             }
-            $health = match (true) {
-                str_contains($parts[3], '(unhealthy)') => 'unhealthy',
-                str_contains($parts[3], '(healthy)') => 'healthy',
-                str_contains($parts[3], '(health: starting)') => 'starting',
-                default => 'none',
-            };
-            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'running' => 'running' === $parts[2], 'health' => $health];
+            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'running' => 'running' === $parts[2], 'health' => 'unknown'];
+        }
+        if ([] === $rows) {
+            return [];
         }
 
+        $health = $this->inspectHealth(array_map(static fn (array $r): string => $r['name'], $rows));
+        foreach ($rows as &$row) {
+            $row['health'] = $health[$row['name']] ?? 'unknown';
+        }
+        unset($row);
+
         return $rows;
+    }
+
+    /**
+     * @param list<string> $containers
+     *
+     * @return array<string, string> container name => healthy|unhealthy|starting|none|unknown
+     */
+    private function inspectHealth(array $containers): array
+    {
+        try {
+            $result = $this->runner->run(['docker', 'inspect', '--format', '{{.Name}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}', ...$containers], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable) {
+            return [];
+        }
+        $health = [];
+        foreach (preg_split('/\R/', trim($result->stdout)) ?: [] as $line) {
+            [$name, $status] = array_pad(explode('|', $line, 2), 2, '');
+            $health[ltrim($name, '/')] = \in_array($status, ['healthy', 'unhealthy', 'starting', 'none'], true) ? $status : 'unknown';
+        }
+
+        return $health;
     }
 
     /**
