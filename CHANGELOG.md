@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-24
+
+### Changed
+- **FLE-375: docs.** Troubleshooting, "After a reboot", explains failed instances at boot; the networking reference notes that `ddev_default` takes the first free subnet of Docker's address pools at boot, so its gateway can change and allow-lists must cover the pools.
+
+### Fixed
+- **FLE-373: Renovate opens security PRs at once, Symfony patches included**: the rule that sent Symfony patch releases to the weekly lock-file maintenance also suppressed vulnerability alerts (17 advisories got no PR on 2026-11-24). A later rule re-enables vulnerability alerts for composer and npm, off schedule and grouped as "security fixes", and patch-level security fixes are automerged once `fleet-gates` is green.
+- **FLE-375: a failed instance no longer stays silently down after a reboot, nor stays failed while its containers run.** `fleet instance:start --all` (and `stop --all`), which `fleet-boot` runs, still skips `failed` instances, but now prints `skipped <id>: state failed — run fleet instance:start <id>` for each and counts them in the summary (`48 succeeded, 0 failed, 1 skipped (failed)`; the JSON document gets a `skipped` list). The status watcher moves a `failed` instance back to `running` once every container of it is running and, where it has a Docker HEALTHCHECK, healthy, and no job is queued or running for it (audit entry `instance.healed`). It never touches `deploying` or `destroying` instances.
+
 ## [1.14.3] - 2026-11-24
 
 ### Security
@@ -1740,7 +1749,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/rcuny/ddev-fleet/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/rcuny/ddev-fleet/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/rcuny/ddev-fleet/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/rcuny/ddev-fleet/compare/v1.14.0...v1.14.1
