@@ -44,7 +44,7 @@
         "symfonycasts/tailwind-bundle": "^1.0",
         "tales-from-a-dev/twig-tailwind-extra": "^1.5",
         "twig/extra-bundle": "^3.31.0",
-        "twig/html-extra": "^3.31.0"
+        "twig/html-extra": "^3.31.1"
     },
     "config": {
         "allow-plugins": {

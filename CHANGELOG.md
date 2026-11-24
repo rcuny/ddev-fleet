@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.3] - 2026-11-24
+
+### Security
+- **FLE-374: Twig 3.31.1.** `twig/twig` 3.30.0 -> 3.31.1 and `twig/html-extra` 3.31.0 -> 3.31.1 close 10 advisories published on 2026-11-23. Nine of them are sandbox bypasses, and Fleet does not use the Twig sandbox. One applies to every application: CVE-2026-133771, a missing autoescape for a variable named like a macro import alias of another scope. No other dependency moved, and `composer audit` is clean.
+
+#### Rollout
+- Upgrade every host: the fix is in the application code that php-fpm and the workers run. No instance restarts.
+
 ## [1.14.2] - 2026-11-24
 
 ### Security
@@ -1732,7 +1740,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.3...HEAD
+[1.14.3]: https://github.com/rcuny/ddev-fleet/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/rcuny/ddev-fleet/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/rcuny/ddev-fleet/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/rcuny/ddev-fleet/compare/v1.13.3...v1.14.0
