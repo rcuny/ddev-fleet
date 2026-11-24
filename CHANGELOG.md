@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.2] - 2026-11-24
+
+### Security
+- **FLE-372: Symfony 8.1.11 and Symfony UX 3.8.x.** The lock moves every `symfony/*` package from 8.1.10 to 8.1.11 and UX to 3.8.x (`ux-icons` and `ux-live-component` 3.8.1). This closes 17 advisories reported by `composer audit` against 1.14.1, among them an authorisation bypass in Live Components (an empty batch request), an SSRF filter bypass in the validator (IPv4-mapped IPv6), a YAML parsing denial of service, and fixes in `security-http`, `http-client`, `routing`, `serializer`, `framework-bundle` and `ux-icons`. No other dependency moved, and `composer audit` is clean.
+
+### Dependencies
+- Symfony UX 3.7.0 -> 3.8.x (`ux-icons` and `ux-live-component` 3.8.1, the rest 3.8.0) (#334).
+- twig/extra-bundle and twig/html-extra ^3.29.0 -> ^3.31.0 (#335).
+- PyYAML >=6.0.3 -> >=6.0.4 in the CI tooling requirements (#331).
+- Terraform provider digitalocean/digitalocean ~> 2.108 -> ~> 2.109, throwaway test hosts only (#332).
+
+#### Rollout
+- Upgrade every host (`fleet upgrade`, or the installer at the new tag): the fixes are in the application code that php-fpm and the workers run.
+
 ## [1.14.1] - 2026-11-21
 
 ### Added
@@ -1718,7 +1732,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.14.2...HEAD
+[1.14.2]: https://github.com/rcuny/ddev-fleet/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/rcuny/ddev-fleet/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/rcuny/ddev-fleet/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/rcuny/ddev-fleet/compare/v1.13.2...v1.13.3
