@@ -33,18 +33,18 @@
         "symfony/scheduler": "8.1.*",
         "symfony/security-bundle": "8.1.*",
         "symfony/serializer": "8.1.*",
-        "symfony/stimulus-bundle": "3.7.*",
+        "symfony/stimulus-bundle": "3.8.*",
         "symfony/twig-bundle": "8.1.*",
-        "symfony/ux-icons": "3.7.*",
-        "symfony/ux-live-component": "3.7.*",
-        "symfony/ux-turbo": "3.7.*",
-        "symfony/ux-twig-component": "3.7.*",
+        "symfony/ux-icons": "3.8.*",
+        "symfony/ux-live-component": "3.8.*",
+        "symfony/ux-turbo": "3.8.*",
+        "symfony/ux-twig-component": "3.8.*",
         "symfony/validator": "8.1.*",
         "symfony/yaml": "8.1.*",
         "symfonycasts/tailwind-bundle": "^1.0",
         "tales-from-a-dev/twig-tailwind-extra": "^1.5",
-        "twig/extra-bundle": "^3.29",
-        "twig/html-extra": "^3.29"
+        "twig/extra-bundle": "^3.31.0",
+        "twig/html-extra": "^3.31.0"
     },
     "config": {
         "allow-plugins": {
@@ -135,7 +135,7 @@
         "symfony/css-selector": "8.1.*",
         "symfony/debug-bundle": "8.1.*",
         "symfony/stopwatch": "8.1.*",
-        "symfony/ux-toolkit": "3.7.*",
+        "symfony/ux-toolkit": "3.8.*",
         "symfony/web-profiler-bundle": "8.1.*"
     }
 }
