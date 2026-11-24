@@ -74,6 +74,10 @@ DDEV's router HTTPS port is `8443` because Caddy owns `443`. Inside the network 
 | Failure | If the router does not come back healthy, Fleet removes both files, writes the marker `~/.ddev/traefik/.fleet-port-mirror-failed`, restarts the router and logs a warning; the deploy still succeeds. While the marker matches the wanted ports nothing is retried; `fleet port:refresh` clears it and retries. |
 | Clients | The certificate inside is DDEV's own, so set `ignoreHTTPSErrors`. Use `https://$FLEET_INSTANCE_HOST` as the base URL, not `DDEV_PRIMARY_URL` (it carries `:8443`). |
 
+## The `ddev_default` subnet is not fixed
+
+Docker recreates `ddev_default` at boot, and the network takes the first free subnet of Docker's address pools (`default-address-pools` in `/etc/docker/daemon.json`, or Docker's built-in pools). Its gateway, which is the address the router and the host are seen at from inside an instance, can therefore change from one boot to the next, for example when another network was created first. Anything that allow-lists the router or gateway address inside an instance (a trusted-proxy list, a firewall rule, an application `trusted_proxies` setting) must allow the address pools, not one IP. Read the current value with `docker network inspect ddev_default --format '{{json .IPAM.Config}}'`.
+
 ## Firewall
 
 `fleet port:firewall` (`--json`) lists the public ports to open: `80`, `443` and each catalogue port a project uses, with a `ufw allow` line each. Port `22` is not listed. Re-run it after assigning a port.

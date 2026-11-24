@@ -47,9 +47,34 @@ final class StartCommandTest extends InstanceCliTestCase
         $tester = $this->command('fleet:instance:start', ['--all' => true]);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertStringContainsString('1 succeeded, 0 failed', $tester->getDisplay());
+        self::assertStringContainsString('1 succeeded, 0 failed, 1 skipped (failed)', $tester->getDisplay());
+        self::assertStringContainsString('skipped acme--i3: state failed — run fleet instance:start acme--i3', $tester->getDisplay());
+        self::assertStringNotContainsString('skipped acme--i2', $tester->getDisplay());
         self::assertCount(1, $this->runner()->callsMatching(['ddev', 'start']));
         self::assertSame(InstanceState::Deploying, $this->stateOf('acme--i2'));
+    }
+
+    public function testAllReportsASkippedFailedInstanceEvenWhenNothingIsLeftToStart(): void
+    {
+        $this->instances([InstanceState::Failed]);
+
+        $tester = $this->command('fleet:instance:start', ['--all' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('skipped acme--i1: state failed', $tester->getDisplay());
+        self::assertStringContainsString('nothing to start, 1 skipped (failed)', $tester->getDisplay());
+    }
+
+    public function testAllJsonListsTheSkippedFailedInstances(): void
+    {
+        $this->instances([InstanceState::Stopped, InstanceState::Failed]);
+
+        $tester = $this->command('fleet:instance:start', ['--all' => true, '--format' => 'json']);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        $doc = json_decode($tester->getDisplay(), true);
+        self::assertIsArray($doc);
+        self::assertSame(['acme--i2'], $doc['skipped']);
     }
 
     public function testAllWithNothingToStart(): void

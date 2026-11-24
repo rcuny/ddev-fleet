@@ -73,6 +73,8 @@ final readonly class AuditLog
     public const string API_TERMINAL_WRITE = 'api.terminal.write';
     /** An admin protected an instance against destroy or removed the protection; the subject is `<id>/on|off` (FLE-363). */
     public const string INSTANCE_PROTECT = 'instance.protect';
+    /** The watcher moved a failed instance back to running because all its containers are up and healthy (FLE-375). */
+    public const string INSTANCE_HEALED = 'instance.healed';
 
     /** The retention pass destroyed (or, on a dry run, did not record) a project's old `ci-` instance; the subject is `<id>/<days>d` (FLE-367). */
     public const string INSTANCE_RETENTION = 'instance.retention';

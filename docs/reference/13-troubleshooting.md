@@ -88,6 +88,7 @@ Page-by-page detail: [05-upgrade.md](05-upgrade.md), [06-backup-and-restore.md](
 |---|---|---|
 | Nothing runs | Instances did not restart. | `journalctl -u fleet-boot`. |
 | Portal answers 502 | Authelia secrets permission, see "Signing in". | Re-run the installer. |
+| An instance stayed down after the reboot | Its state was `failed`: `fleet instance:start --all` (what `fleet-boot` runs) never starts a `failed` instance, because a person decides about it. | `journalctl -u fleet-boot` names each one (`skipped <id>: state failed — run fleet instance:start <id>`) and the summary counts them (`48 succeeded, 0 failed, 1 skipped (failed)`). The status watcher moves a `failed` instance back to `running` by itself once every container of it is running and, where it has a Docker HEALTHCHECK, `healthy` (audit entry `instance.healed`), and never while a job is queued or running for it. If a container is missing, exited, `unhealthy` or still `starting`, it stays `failed`: fix that, or run `fleet instance:start <id>`. |
 
 ## Network isolation
 
