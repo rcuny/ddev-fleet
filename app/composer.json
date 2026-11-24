@@ -43,8 +43,8 @@
         "symfony/yaml": "8.1.*",
         "symfonycasts/tailwind-bundle": "^1.0",
         "tales-from-a-dev/twig-tailwind-extra": "^1.5",
-        "twig/extra-bundle": "^3.29",
-        "twig/html-extra": "^3.29"
+        "twig/extra-bundle": "^3.31.0",
+        "twig/html-extra": "^3.31.0"
     },
     "config": {
         "allow-plugins": {

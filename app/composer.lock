@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "921cad8d1101790dad5c9c8ba4c23037",
+    "content-hash": "65e73cedb20099cceec6bda1947a8138",
     "packages": [
         {
             "name": "composer/semver",
@@ -6435,7 +6435,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-22T06:49:09+00:00"
+            "time": "2026-11-22T06:49:09+00:00",
+            "published-time": "2026-11-22T06:52:37+00:00"
         },
         {
             "name": "symfony/stopwatch",
@@ -6951,16 +6952,16 @@
         },
         {
             "name": "symfony/ux-icons",
-            "version": "v3.8.0",
+            "version": "v3.8.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/ux-icons.git",
-                "reference": "b4701c2e843d1ba77c83b01295cd00913385f27b"
+                "reference": "b5a0303482211bfc97a24726890acde6bd6cb6b8"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/ux-icons/zipball/b4701c2e843d1ba77c83b01295cd00913385f27b",
-                "reference": "b4701c2e843d1ba77c83b01295cd00913385f27b",
+                "url": "https://api.github.com/repos/symfony/ux-icons/zipball/b5a0303482211bfc97a24726890acde6bd6cb6b8",
+                "reference": "b5a0303482211bfc97a24726890acde6bd6cb6b8",
                 "shasum": ""
             },
             "require": {
@@ -7022,7 +7023,7 @@
                 "twig"
             ],
             "support": {
-                "source": "https://github.com/symfony/ux-icons/tree/v3.8.0"
+                "source": "https://github.com/symfony/ux-icons/tree/v3.8.1"
             },
             "funding": [
                 {
@@ -7042,20 +7043,21 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-15T08:13:44+00:00"
+            "time": "2026-11-24T07:03:25+00:00",
+            "published-time": "2026-11-24T07:25:40+00:00"
         },
         {
             "name": "symfony/ux-live-component",
-            "version": "v3.8.0",
+            "version": "v3.8.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/ux-live-component.git",
-                "reference": "6b7820193eddb1bd890d6d318531e08b12335ee3"
+                "reference": "e49210a05005317b9a6c885b0d9953e77909fd3e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/ux-live-component/zipball/6b7820193eddb1bd890d6d318531e08b12335ee3",
-                "reference": "6b7820193eddb1bd890d6d318531e08b12335ee3",
+                "url": "https://api.github.com/repos/symfony/ux-live-component/zipball/e49210a05005317b9a6c885b0d9953e77909fd3e",
+                "reference": "e49210a05005317b9a6c885b0d9953e77909fd3e",
                 "shasum": ""
             },
             "require": {
@@ -7124,7 +7126,7 @@
                 "twig"
             ],
             "support": {
-                "source": "https://github.com/symfony/ux-live-component/tree/v3.8.0"
+                "source": "https://github.com/symfony/ux-live-component/tree/v3.8.1"
             },
             "funding": [
                 {
@@ -7144,7 +7146,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-22T06:49:09+00:00"
+            "time": "2026-11-24T07:24:53+00:00",
+            "published-time": "2026-11-24T07:25:38+00:00"
         },
         {
             "name": "symfony/ux-turbo",
@@ -7248,7 +7251,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-22T06:49:09+00:00"
+            "time": "2026-11-22T06:49:09+00:00",
+            "published-time": "2026-11-22T06:51:36+00:00"
         },
         {
             "name": "symfony/ux-twig-component",
@@ -7337,7 +7341,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-20T06:32:46+00:00"
+            "time": "2026-11-20T06:32:46+00:00",
+            "published-time": "2026-11-22T06:50:51+00:00"
         },
         {
             "name": "symfony/validator",
@@ -7944,16 +7949,16 @@
         },
         {
             "name": "twig/extra-bundle",
-            "version": "v3.29.0",
+            "version": "v3.31.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/twigphp/twig-extra-bundle.git",
-                "reference": "aaa2993e19293a99240c4c61aa461d743b0dd569"
+                "reference": "c97881570a39593c7aa78bdd6b5e9838fb081fbf"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/twigphp/twig-extra-bundle/zipball/aaa2993e19293a99240c4c61aa461d743b0dd569",
-                "reference": "aaa2993e19293a99240c4c61aa461d743b0dd569",
+                "url": "https://api.github.com/repos/twigphp/twig-extra-bundle/zipball/c97881570a39593c7aa78bdd6b5e9838fb081fbf",
+                "reference": "c97881570a39593c7aa78bdd6b5e9838fb081fbf",
                 "shasum": ""
             },
             "require": {
@@ -7964,7 +7969,7 @@
             },
             "require-dev": {
                 "league/commonmark": "^2.7",
-                "symfony/phpunit-bridge": "^6.4|^7.0",
+                "symfony/phpunit-bridge": "^7.4|^8.0",
                 "twig/cache-extra": "^3.0",
                 "twig/cssinliner-extra": "^3.0",
                 "twig/html-extra": "^3.0",
@@ -8002,7 +8007,7 @@
                 "twig"
             ],
             "support": {
-                "source": "https://github.com/twigphp/twig-extra-bundle/tree/v3.29.0"
+                "source": "https://github.com/twigphp/twig-extra-bundle/tree/v3.31.0"
             },
             "funding": [
                 {
@@ -8014,20 +8019,20 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-11T08:59:50+00:00"
+            "time": "2026-11-23T11:36:10+00:00"
         },
         {
             "name": "twig/html-extra",
-            "version": "v3.29.0",
+            "version": "v3.31.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/twigphp/html-extra.git",
-                "reference": "7147611979df81edb78baf7d003860b72e335c3f"
+                "reference": "92d388bd1685a1ef772c44d5f21f867e9550700a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/twigphp/html-extra/zipball/7147611979df81edb78baf7d003860b72e335c3f",
-                "reference": "7147611979df81edb78baf7d003860b72e335c3f",
+                "url": "https://api.github.com/repos/twigphp/html-extra/zipball/92d388bd1685a1ef772c44d5f21f867e9550700a",
+                "reference": "92d388bd1685a1ef772c44d5f21f867e9550700a",
                 "shasum": ""
             },
             "require": {
@@ -8037,7 +8042,7 @@
                 "twig/twig": "^3.13|^4.0"
             },
             "require-dev": {
-                "symfony/phpunit-bridge": "^6.4|^7.0"
+                "symfony/phpunit-bridge": "^7.4|^8.0"
             },
             "type": "library",
             "autoload": {
@@ -8070,7 +8075,7 @@
                 "twig"
             ],
             "support": {
-                "source": "https://github.com/twigphp/html-extra/tree/v3.29.0"
+                "source": "https://github.com/twigphp/html-extra/tree/v3.31.0"
             },
             "funding": [
                 {
@@ -8082,7 +8087,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-06T20:35:36+00:00"
+            "time": "2026-11-23T16:19:15+00:00"
         },
         {
             "name": "twig/twig",
@@ -11710,7 +11715,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-20T08:18:10+00:00"
+            "time": "2026-11-20T08:18:10+00:00",
+            "published-time": "2026-11-22T06:50:49+00:00"
         },
         {
             "name": "symfony/web-profiler-bundle",
@@ -11812,5 +11818,5 @@
         "ext-sodium": "*"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }
