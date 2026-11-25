@@ -6,9 +6,10 @@ declare(strict_types=1);
  * Builds the "### Dependencies" bullets for the Renovate PRs merged since the previous v1.* tag, from git only
  * (no API). Used by ci/changelog-assemble.php; a root that is not a git repository yields nothing.
  *
- * A Renovate merge is a first-parent commit whose subject mentions "renovate" (a Bitbucket "Merged in renovate/<name>
- * (pull request #N)" or a hand-made "Merge Renovate PR #N (title)"). PRs of one family (same branch name, or same first
- * word of the title) share one bullet. A PR already cited as "#N" in the given texts is skipped.
+ * A Renovate merge is a first-parent merge commit M of HEAD whose merged side (M^1..M^2) holds at least one commit
+ * authored by Renovate (author name or e-mail starting with "renovate", e.g. "renovate-ddev4" or
+ * renovate@whitesourcesoftware.com). The subject only gives the PR number ("pull request #N", "PR #N", "Renovate PR #N")
+ * and the title. PRs of one family (same branch name, or same first word of the title) share one bullet. A PR already cited as "#N" in the given texts is skipped.
  */
 
 /**
@@ -28,8 +29,7 @@ function renovateDependenciesSection(string $root, array $citedTexts): string
     /** @var array<string, array{title: string, prs: list<int>}> $families */
     $families = [];
     foreach (renovateMergeSubjects($root) as $subject) {
-        if (1 !== preg_match('/renovate/i', $subject)
-            || 1 !== preg_match('/(?:pull request|PR) #(\d+)/i', $subject, $pr)) {
+        if (1 !== preg_match('/(?:pull request|PR) #(\d+)/i', $subject, $pr)) {
             continue;
         }
         $number = (int) $pr[1];
@@ -41,6 +41,7 @@ function renovateDependenciesSection(string $root, array $citedTexts): string
             $key = strtolower($b[1]);
         } else {
             $title = 1 === preg_match('/\(([^)]+)\)\s*$/', $subject, $t) ? $t[1] : (1 === preg_match('/PR #\d+\b:?\s*(\S.*)$/i', $subject, $t) ? $t[1] : 'dependency update');
+            $title = preg_replace('/^update dependency\s+/i', '', $title) ?? $title;
             $key = strtolower(explode(' ', trim($title))[0]);
         }
         $families[$key]['title'] ??= $title;
@@ -62,8 +63,8 @@ function renovateDependenciesSection(string $root, array $citedTexts): string
 }
 
 /**
- * @return list<string> first-parent merge subjects since the latest v1.* tag reachable from HEAD or the last release
- *                      back-merge, whichever is newer; newest first
+ * @return list<string> subjects of the first-parent merges since the highest v1.* tag (by version) whose merged side
+ *                      holds a Renovate-authored commit; newest first
  */
 function renovateMergeSubjects(string $root): array
 {
@@ -80,20 +81,24 @@ function renovateMergeSubjects(string $root): array
 
         return 0 === proc_close($process) ? $out : null;
     };
-    $tags = explode("\n", trim((string) $git(['tag', '--merged', 'HEAD', '--list', 'v1.*', '--sort=-v:refname'])));
-    $tag = $tags[0];
-    $range = '' === $tag ? ['HEAD'] : [$tag.'..HEAD'];
-    $log = $git(array_merge(['log', '--first-parent', '--merges', '--format=%s'], $range));
+    // A release tag sits on main and contains everything released, so the range is simply tag..HEAD, whether or not the
+    // release was already back-merged into develop.
+    $tag = trim(explode("\n", trim((string) $git(['tag', '--list', 'v1.*', '--sort=-v:refname'])))[0]);
+    $range = '' === $tag ? 'HEAD' : $tag.'..HEAD';
+    $log = $git(['log', '--first-parent', '--merges', '--format=%H%x09%s', $range]);
 
     $subjects = [];
-    foreach (explode("\n", (string) $log) as $subject) {
-        // The back-merge of the previous release branch marks where its changelog ended (its tag is on main, not
-        // an ancestor of develop, so the tag range alone would reach back to an older release).
-        if (1 === preg_match("#^Merge branch '(?:release|hotfix)/#", $subject)) {
-            break;
+    foreach (explode("\n", (string) $log) as $line) {
+        [$sha, $subject] = array_pad(explode("\t", $line, 2), 2, '');
+        if ('' === $sha || 1 === preg_match("#^Merge branch '(?:release|hotfix)/#", $subject)) {
+            continue;
         }
-        if ('' !== trim($subject)) {
-            $subjects[] = $subject;
+        $authors = $git(['log', '--format=%an <%ae>', $sha.'^1..'.$sha.'^2']);
+        foreach (explode("\n", (string) $authors) as $author) {
+            if (1 === preg_match('/^renovate|<renovate/i', $author)) {
+                $subjects[] = $subject;
+                break;
+            }
         }
     }
 
