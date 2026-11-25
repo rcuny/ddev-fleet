@@ -7,8 +7,8 @@ declare(strict_types=1);
  * (no API). Used by ci/changelog-assemble.php; a root that is not a git repository yields nothing.
  *
  * A Renovate merge is a first-parent merge commit M of HEAD whose merged side (M^1..M^2) holds at least one commit
- * authored by Renovate (author name or e-mail starting with "renovate", e.g. "renovate-ddev4" or
- * renovate@whitesourcesoftware.com). The subject only gives the PR number ("pull request #N", "PR #N", "Renovate PR #N")
+ * authored by Renovate (author name or e-mail starting with "renovate", e.g. "renovate-ci" or
+ * the public Renovate bot address). The subject only gives the PR number ("pull request #N", "PR #N", "Renovate PR #N")
  * and the title. PRs of one family (same branch name, or same first word of the title) share one bullet. A PR already cited as "#N" in the given texts is skipped.
  */
 

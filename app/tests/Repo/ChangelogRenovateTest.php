@@ -25,8 +25,8 @@ final class ChangelogRenovateTest extends TestCase
         $this->git('add', '.');
         $this->git('commit', '-q', '-m', 'init');
         $this->git('tag', '-a', 'v1.0.0', '-m', 'v1.0.0');
-        $this->merge('renovate/doctrine', 'Merged in renovate/doctrine (pull request #303)', 'renovate-ddev4 <x@bots.bitbucket.org>');
-        $this->merge('renovate/twig', 'FLE-10 Merge Renovate PR #335 (twig ^3.31.0)', 'renovate-ddev4 <x@bots.bitbucket.org>');
+        $this->merge('renovate/doctrine', 'Merged in renovate/doctrine (pull request #303)', 'renovate-ci <bot@example.test>');
+        $this->merge('renovate/twig', 'FLE-10 Merge Renovate PR #335 (twig ^3.31.0)', 'renovate-ci <bot@example.test>');
         $this->merge('feature/FLE-1-x', 'FLE-1 Merge PR #340: a feature');
         $this->merge('feature/FLE-2-renovate-alerts', 'FLE-2 Merge PR #341: Renovate security alerts');
     }
@@ -130,7 +130,7 @@ final class ChangelogRenovateTest extends TestCase
         $this->git('tag', '-a', 'v1.1.0', '-m', 'v1.1.0');
         $this->git('switch', '-q', 'develop');
         $this->git('merge', '-q', '--no-ff', '-m', 'FLE-3 Merge PR #350: later', 'release/1.1.0');
-        $this->merge('renovate/new', 'Merged in renovate/new (pull request #351)', 'renovate-ddev4 <x@bots.bitbucket.org>');
+        $this->merge('renovate/new', 'Merged in renovate/new (pull request #351)', 'renovate-ci <bot@example.test>');
         $out = $this->preview();
 
         self::assertSame(1, substr_count($out, '- Renovate:'));
