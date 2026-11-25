@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-11-25
+
+### Changed
+- **FLE-378: Renovate dependency bullets are generated at release time.** `ci/changelog-assemble.php` lists the Renovate PRs merged since the previous `v1.*` tag (git only) under `### Dependencies`; no more hand-written `renovate-YYYY-MM-DD.md` fragments.
+
+### Fixed
+- **FLE-376: the failed-instance heal reads container health from `docker inspect` and re-checks jobs before saving**
+  - Health comes from `.State.Health.Status`; an unknown value or a container that cannot be inspected counts as not healthy (it used to count as healthy when Docker's `ps` wording changed).
+  - A job queued between the health check and the save keeps the instance failed, and the `instance.healed` audit entry is written only after the save succeeded.
+
+### Dependencies
+- Renovate: php >=8.4.2 (security), composer.lock refreshed (#340)
+
 ## [1.15.0] - 2026-11-24
 
 ### Changed
@@ -1749,7 +1762,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/rcuny/ddev-fleet/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/rcuny/ddev-fleet/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/rcuny/ddev-fleet/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/rcuny/ddev-fleet/compare/v1.14.1...v1.14.2

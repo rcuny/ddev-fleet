@@ -79,13 +79,36 @@ final class InstanceWatcherTest extends InstanceJobTestCase
      */
     private function psRows(string $id, array $rows): CommandResult
     {
-        return new CommandResult(0, implode("\n", array_map(static fn (string $r): string => 'ddev-'.$id.'-'.explode('|', $r, 2)[0].'|'.$r, $rows))."\n");
+        return new CommandResult(0, implode("\n", array_map(static function (string $r) use ($id): string {
+            [$service, $state] = explode('|', $r, 3);
+
+            return 'ddev-'.$id.'-'.$service.'|'.$service.'|'.$state;
+        }, $rows))."\n");
+    }
+
+    /**
+     * @param list<string> $rows `service|state|status` lines; the health comes from the status wording
+     */
+    private function inspectRows(string $id, array $rows): CommandResult
+    {
+        return new CommandResult(0, implode("\n", array_map(static function (string $r) use ($id): string {
+            $parts = explode('|', $r, 3);
+            $health = match (true) {
+                str_contains($parts[2], '(unhealthy)') => 'unhealthy',
+                str_contains($parts[2], '(healthy)') => 'healthy',
+                str_contains($parts[2], '(health: starting)') => 'starting',
+                str_contains($parts[2], '(health: weird)') => 'weird',
+                default => 'none',
+            };
+
+            return '/ddev-'.$id.'-'.$parts[0].'|'.$health;
+        }, $rows))."\n");
     }
 
     /**
      * @param list<string> $rows
      */
-    private function healTick(array $rows, string $ddevStatus = 'running', bool $withJob = false): InstanceState
+    private function healTick(array $rows, string $ddevStatus = 'running', bool $withJob = false, bool $jobAfterInspect = false): InstanceState
     {
         $instance = $this->instance('main', 'develop', InstanceState::Failed);
         if ($withJob) {
@@ -94,6 +117,9 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         $id = $instance->id();
         $this->runner->expect(['ddev', 'list'], $this->ddevList([$id => $ddevStatus]));
         $this->runner->expect(['docker', 'ps'], $this->psRows($id, $rows));
+        $this->runner->expect(['docker', 'inspect'], $this->inspectRows($id, $rows), $jobAfterInspect ? function () use ($instance): void {
+            $this->job('start', $instance);
+        } : null);
 
         $this->watcher()->tick($this->clock->now());
 
@@ -117,6 +143,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         yield 'one unhealthy' => [['web|running|Up 5 minutes (healthy)', 'db|running|Up 5 minutes (unhealthy)']];
         yield 'one still starting' => [['web|running|Up 5 seconds (health: starting)', 'db|running|Up 5 minutes (healthy)']];
         yield 'one exited' => [['web|running|Up 5 minutes (healthy)', 'db|exited|Exited (1) 2 minutes ago']];
+        yield 'unknown health value' => [['web|running|Up 5 minutes (health: weird)', 'db|running|Up 5 minutes (healthy)']];
         yield 'one missing (no web)' => [['db|running|Up 5 minutes (healthy)']];
         yield 'no container' => [[]];
     }
@@ -128,6 +155,12 @@ final class InstanceWatcherTest extends InstanceJobTestCase
     public function testAFailedInstanceStaysFailedWhenAContainerIsNotUpAndHealthy(array $rows): void
     {
         self::assertSame(InstanceState::Failed, $this->healTick($rows));
+        self::assertCount(0, $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'instance.healed']));
+    }
+
+    public function testAJobQueuedBetweenTheHealthCheckAndTheSaveKeepsTheInstanceFailed(): void
+    {
+        self::assertSame(InstanceState::Failed, $this->healTick(['web|running|Up 5 minutes (healthy)', 'db|running|Up 5 minutes (healthy)'], 'running', false, true));
         self::assertCount(0, $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'instance.healed']));
     }
 

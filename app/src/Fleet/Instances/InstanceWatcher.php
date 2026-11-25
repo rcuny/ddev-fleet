@@ -238,11 +238,11 @@ final class InstanceWatcher
         $touched = [];
         $changed = [];
         $all = $this->instances->all();
+        $healed = [];
         foreach ($this->healable($all, $projects) as $instance) {
             $instance->observe(InstanceState::Running, $this->ram[$instance->id()] ?? $instance->ramMib(), $now);
             $changed[] = $instance; // saved by the pass below, which also takes ddev's own word
-            $this->audit?->record('system', AuditLog::INSTANCE_HEALED, $instance->id().': failed -> running, all containers up and healthy');
-            $this->logger->warning($instance->id().': was failed, all containers are up and healthy: now running.');
+            $healed[] = $instance;
         }
         foreach ($all as $instance) {
             if (!\in_array($instance->state(), [InstanceState::Running, InstanceState::Stopped, InstanceState::Unknown], true)) {
@@ -259,8 +259,23 @@ final class InstanceWatcher
             $touched[] = $instance;
         }
 
+        // FLE-376: close the check-then-save window. A job queued since healable() ran wins: the instance stays failed.
+        if ([] !== $healed && null !== $this->jobs) {
+            $busy = $this->jobs->activeInstanceIds(array_map(static fn (Instance $i): string => $i->id(), $healed));
+            foreach ($healed as $instance) {
+                if (\in_array($instance->id(), $busy, true)) {
+                    $instance->observe(InstanceState::Failed, null, $now);
+                    $changed = array_values(array_filter($changed, static fn (Instance $c): bool => $c !== $instance));
+                    $healed = array_values(array_filter($healed, static fn (Instance $h): bool => $h !== $instance));
+                }
+            }
+        }
         if ([] !== $touched) {
             $this->instances->saveAll($touched);
+        }
+        foreach ($healed as $instance) {
+            $this->audit?->record('system', AuditLog::INSTANCE_HEALED, $instance->id().': failed -> running, all containers up and healthy');
+            $this->logger->warning($instance->id().': was failed, all containers are up and healthy: now running.');
         }
         foreach ($changed as $instance) {
             $this->feed->instanceChanged($instance->id());
